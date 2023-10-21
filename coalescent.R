@@ -275,209 +275,159 @@ ccov_dag_<-function(g){
 }
 
 
-tg0 <- simCoal_(4, labels=c("A","B","C","O"), times = "coal",outgroup="O")
-
-
-for(i in 1:length(tg0$nl)){
-  print(paste(i,"children:", tg0$nl[[i]]$children, "parent:",tg0$nl[[i]]$parents))
-}
-
-tg1 = mixedge_(tg0,2,3,0.5,0.2)
-tg2 = mixedge_(tg1,2,3,0.5,0.2)
-
-for(i in 1:length(tg1$nl)){
-  print(paste(i,"children:", tg1$nl[[i]]$children, "parent:",tg1$nl[[i]]$parents))
-}
-
-for(i in 1:length(tg2$nl)){
-  print(paste(i,"children:", tg2$nl[[i]]$children, "parent:",tg2$nl[[i]]$parents))
-}
 
 tg0 <- simCoal_(4, labels=c("A","B","C","O"), times = "coal",outgroup="O")
+tg0$nl[[4]]$children
 
-for(i in 1:length(tg0$nl)){
-  print(paste(i,"children:", tg0$nl[[i]]$children, "parent:",tg0$nl[[i]]$parents))
-}
+
 
 tg1 = mixedge_(tg0,2,3,0.5,0.2)
 tg2 = mixedge_(tg1,2,3,0.5,0.2)
 tg3 <- removemixedge_(tg1,8)
 
-for(i in 1:length(tg3$nl)){
-  print(paste(i,"children:", tg3$nl[[i]]$children, "parent:",tg3$nl[[i]]$parents))
+
+
+printFamily <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"children:", g$nl[[i]]$children, "parent:",g$nl[[i]]$parents))
+  }
 }
 
+printDepths <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"d:", g$nl[[i]]$d))
+  }
+}
 
+printTimes <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"t:", g$nl[[i]]$t))
+  }
+}
 
-assignlocation_ <- function(g,mindepth=0,maxdepth=Inf,rightalign=FALSE){
+assignlocation_ <- function(g,mindepth=0,maxdepth=Inf){
   ret=matrix(NA,nrow=length(g$nl),ncol=2)
-  nleft=0
   nnodes=length(g$nl)
-  depth=0
-  i=g$root
   node=g$root
   for(i in 1:length(g$nl)) g$nl[[i]]$tmp=0 # tracks completed
   mydepth=function(x){
     ifelse(is.na(x),0,min(max(mindepth,x),maxdepth))
   }
-  maxtime=0
-  while(TRUE){
+  fin = FALSE
+  while(fin == FALSE){
+    nnodes = nnodes - 1
+    if(node == g$root) {t0 <- 0
+    g$nl[[node]]$t = 0
+    }else{t0 <- g$nl[[node]]$t}
+
     
-    ## Situations:
-    ## 1. We have a left and need to go there
-    lefttodo = (!any(is.na(g$nl[[node]]$children)) && any(g$nl[[g$nl[[node]]$children]]$tmp==0))
-    ## 2. We place ourself
-    selftodo = (g$nl[[node]]$tmp==0)
-    ## 3. Right to do
-    righttodo = ((!is.na(g$nl[[node]]$cr)) &&
-                   (g$nl[[g$nl[[node]]$cr]]$tmp==0) &&
-                   (g$nl[[node]]$type!="mixture") )
-    ## 4. Return to parent if we have one
-    atroot = (g$root==node)
-    ## 5. Stop if -back- at root
-    if(lefttodo){
-      node=g$nl[[node]]$cl
-      depth=depth+mydepth(g$nl[[node]]$d)
-      print(paste("node:",node, "depth:", depth))
-      next;
-    }else if(selftodo) {
-      print(paste("doing node",node,"to",nleft,",",depth))
-      g$nl[[node]]$tmp=1
-      g$nl[[node]]$t=depth
-      g$nl[[node]]$p=nleft #/nnodes
-      maxtime=max(maxtime,depth)
-      if(is.na(g$nl[[node]]$pl)){ nleft=nleft + 1
-      }else if(g$nl[[ g$nl[[node]]$pl ]]$type=="split") {  nleft=nleft + 1
-      ##            }else if(g$nl[[ node ]]$type=="split") {  nleft=nleft + 1
+    
+    if(any(!is.na(g$nl[[node]]$children))){
+      children <- g$nl[[node]]$children
+      for(c in children){
+        depth = t0 + mydepth(g$nl[[c]]$d)
+        if(g$nl[[c]]$tmp == 0) {g$nl[[c]]$t = depth}
+        g$nl[[c]]$tmp = 1
       }
-      next;
-    }else if(righttodo){
-      node=g$nl[[node]]$cr
-      depth=depth+mydepth(g$nl[[node]]$d)
-      next;            
-    }else if(!atroot){
-      depth=depth - mydepth(g$nl[[node]]$d)
-      node=g$nl[[node]]$pl
-      next;
-    }else{
-      break;
     }
-  }
-  if(rightalign){
-    for(i in g$tips){
-      g$nl[[i]]$t=maxtime
+    
+    for(j in nnodes:1){
+      if(j==1 && g$nl[[1]]$tmp == 1) {fin = TRUE
+        break}
+      if(g$nl[[j]]$type != "spare" && g$nl[[j]]$tmp == 1){
+        node = j
+        break}
+
     }
   }
   g
 }
 
 
-
-
-
-################################################################################
-assignlocation<-function(g,mindepth=0,maxdepth=Inf,rightalign=FALSE){
-  ret=matrix(NA,nrow=length(g$nl),ncol=2)
-  nleft=0
-  nnodes=length(g$nl)
-  ntips <- length(g$tips)
-  depth=0
-  i=g$root
-  node=g$root
-  for(i in 1:length(g$nl)) g$nl[[i]]$tmp=0 # tracks completed
-  mydepth=function(x){
-    ifelse(is.na(x),0,min(max(mindepth,x),maxdepth))
-  }
-  maxtime=0
-  while(TRUE){
-    #selftodo = (g$nl[[node]]$tmp==0)
-    
-    for (k in 1:ntips) {
-      c <- g$nl[[node]]$children[k]
-      if(!is.na(c)){
-        #ctodo <-  (g$nl[[c]]$tmp==0) #tmp == 0 for child c
-
-        
-        
-        if(ctodo){
-          node = c
-          depth=depth+mydepth(g$nl[[node]]$d)
-          next;
-        }else if(selftodo) {
-            print(paste("doing node",node,"to",nleft,",",depth))
-            g$nl[[node]]$tmp=1
-            g$nl[[node]]$t=depth
-            g$nl[[node]]$p=nleft #/nnodes
-            maxtime=max(maxtime,depth)
-            if(is.na(g$nl[[node]]$pl)){ nleft=nleft + 1
-            }else if(g$nl[[ g$nl[[node]]$pl ]]$type=="split") {  nleft=nleft + 1
-        }
-        
-    selftodo <- (g$nl[[node]]$tmp==0)
-    
-    ## Situations:
-    ## 1. We have a left and need to go there
-    
-    childrentodo = any(!is.na(g$nl[[node]]$children)) 
-
-    ## 2. We place ourself
-    selftodo = (g$nl[[node]]$tmp==0)
-
-    ## 3. Return to parent if we have one
-    atroot = (g$root==node)
-    ## 4. Stop if -back- at root
-    if(childrentodo){
-
-          depth=depth+mydepth(g$nl[[node]]$d)
-        }
-      }
-      next;
-    }else if(selftodo) {
-      #            print(paste("doing node",node,"to",nleft,",",depth))
-      g$nl[[node]]$tmp=1
-      g$nl[[node]]$t=depth
-      g$nl[[node]]$p=nleft #/nnodes
-      maxtime=max(maxtime,depth)
-      if(is.na(g$nl[[node]]$pl)){ nleft=nleft + 1
-      }else if(g$nl[[ g$nl[[node]]$pl ]]$type=="split") {  nleft=nleft + 1
-      ##            }else if(g$nl[[ node ]]$type=="split") {  nleft=nleft + 1
-      }
-      next;
-    }else if(!atroot){
-      depth=depth - mydepth(g$nl[[node]]$d)
-      node=g$nl[[node]]$pl
-      next;
-    }else{
-      break;
-    }
-  }
-  if(rightalign){
-    for(i in g$tips){
-      g$nl[[i]]$t=maxtime
-    }
-  }
-  g
+edges.cg<-function(g){
+  ## Extract properties of all edges as a data frame
+  edge.length=do.call("c",
+                      lapply(rev(g$nl[g$internal]),function(n){
+                        c(c_get(g,n,TRUE,"d"),
+                          c_get(g,n,FALSE,"d"))
+                      })
+  )
+  edge.w=do.call("c",
+                 lapply(rev(g$nl[g$internal]),function(n){
+                   c(c_get(g,n,TRUE,"w"),
+                     c_get(g,n,FALSE,"w"))
+                 })
+  )
+  edge=do.call("rbind",
+               lapply(rev(g$nl[g$internal]),function(n){
+                 tr=c()
+                 if(!is.na(n$cl)) tr= rbind(tr,c(n$id,n$cl))
+                 #if(!is.na(n$cr)) tr= rbind(tr,c(n$id,n$cr))
+                 tr
+               })
+  )
+  edge.ismix=do.call("c",
+                     lapply(rev(g$nl[g$internal]),function(n){
+                       pr=c(c_get(g,n,TRUE,"pr"),
+                            c_get(g,n,FALSE,"pr"))
+                       pr[is.na(pr)]=FALSE
+                       as.numeric(pr==n$id)
+                     })
+  )
+  colnames(edge)=c("parent","child")
+  as.data.frame(cbind(edge,
+                      weight=edge.w,
+                      length=edge.length,
+                      mix=edge.ismix))
 }
 
-plot(tg0,keeplocation = F)
 
-plot.cg=function(g,ref=g,arrows.length=0.1,edges=NULL,
-                 arrows.col=c("grey","red"),
-                 text.col=c("darkgrey","darkred"),
-                 digits=1,mindepth=1e-2,maxdepth=Inf,rightalign=FALSE,
-                 tips=NULL,cex.edge.text=0.5,
-                 label.mixture=TRUE,
-                 label.nonmixture=TRUE,
-                 label.internal=TRUE,
-                 labels.col="black",
-                 showedges=NA,
-                 keeplocation=FALSE,
-                 lwd=1,textdelta=0,
-                 format=c("triangular","rectangular"),rdelta=0.1,rdelta2=0.1,vadj.edge=0.2,
-                 adj.node=0,adj.edge=0,show=TRUE,showaxis=TRUE,cex.labels=1,
-                 ...){
+tg0 <- simCoal_(4, labels=c("A","B","C","O"), times = "coal",outgroup="O")
+x <- assignlocation_(tg0)
+plot_.cg(tg0)
+
+printTimes(x)
+
+printFamily(x)
+
+edges
+
+g = simCoal(4, labels=c("A","B","C","O"), times = "coal",outgroup="O")
+
+x <- assignlocation(g)
+edges.cg(x)
+
+g$nl[[7]]$d
+
+printDepths(g)
+
+printTimes(g)
+
+printDepths(x)
+
+printTimes(x)
+
+plot(g)
+
+
+
+plot_.cg=function(g,ref=g,arrows.length=0.1,edges=NULL,
+                  arrows.col=c("grey","red"),
+                  text.col=c("darkgrey","darkred"),
+                  digits=1,mindepth=1e-2,maxdepth=Inf,rightalign=FALSE,
+                  tips=NULL,cex.edge.text=0.5,
+                  label.mixture=TRUE,
+                  label.nonmixture=TRUE,
+                  label.internal=TRUE,
+                  labels.col="black",
+                  showedges=NA,
+                  keeplocation=FALSE,
+                  lwd=1,textdelta=0,
+                  format=c("triangular","rectangular"),rdelta=0.1,rdelta2=0.1,vadj.edge=0.2,
+                  adj.node=0,adj.edge=0,show=TRUE,showaxis=TRUE,cex.labels=1,
+                  ...){
   ## Plot without requiring igraph
-  if(!keeplocation) g=assignlocation(g,mindepth,maxdepth,rightalign)
+  if(!keeplocation) g=assignlocation_(g,mindepth,maxdepth)
   if(all(is.null(edges))){
     edges=edges.cg(g)
     edges[,"weight"]=format(edges[,"weight"],digits=digits)
@@ -535,51 +485,4 @@ plot.cg=function(g,ref=g,arrows.length=0.1,edges=NULL,
   order=tlayout[order(tlayout[1:g$n,"p"],decreasing=F),"label"]
   invisible(list(layout=tlayout,edges=edges,order=order))
 }
-
-
-################################################################################
-
-
-cnode<-function(id,pl=NA,pr=NA,cl=NA,cr=NA,d=NA,t=NA,p=NA,w=NA,type=NA){
-  ## This is the generic function to create or update a node
-  ## Pass an id to create a new node
-  ## Pass a cnode to update it
-  ## Returns a cnode
-  if(is(id,"cnode")){
-    if(!is.na(pl)) id$pl=pl #  left parent
-    if(!is.na(pr)) id$pr=pr #  right parent
-    if(!is.na(cl)) id$cl=cl #  left child
-    if(!is.na(cr)) id$cr=cr #  right child
-    if(!is.na(d)) id$d=d  # time from root
-    if(!is.na(t)) id$t=t # time from tips
-    if(!is.na(p)) id$p=p
-    if(!is.na(w)) id$w=w
-    if(!is.na(type)) id$type=type
-    return(id)
-  }else{
-    if(is.na(type)) type="split"
-    r=list(id=id,
-           pl=pl,
-           pr=pr,
-           cl=cl,
-           cr=cr,
-           d=d,
-           t=t,
-           p=p,
-           w=w,
-           type=type)
-    class(r)="cnode"
-    return(r)
-  }
-}
-
-
-#labels=c("C","A","B","O")
-
-tg0 <- simCoal(4, times = "test",outgroup="O")
-
-
-plot(tg0)
-is(tg0)
-
 
