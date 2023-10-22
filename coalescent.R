@@ -275,143 +275,131 @@ ccov_dag_<-function(g){
 }
 
 
-
-tg0 <- simCoal_(4, labels=c("A","B","C","O"), times = "coal",outgroup="O")
-tg0$nl[[4]]$children
-
-
-
-tg1 = mixedge_(tg0,2,3,0.5,0.2)
-tg2 = mixedge_(tg1,2,3,0.5,0.2)
-tg3 <- removemixedge_(tg1,8)
-
-
-
-printFamily <- function(g){
-  for(i in 1:length(g$nl)){
-    print(paste("node:",i,"children:", g$nl[[i]]$children, "parent:",g$nl[[i]]$parents))
-  }
-}
-
-printDepths <- function(g){
-  for(i in 1:length(g$nl)){
-    print(paste("node:",i,"d:", g$nl[[i]]$d))
-  }
-}
-
-printTimes <- function(g){
-  for(i in 1:length(g$nl)){
-    print(paste("node:",i,"t:", g$nl[[i]]$t))
-  }
-}
-
 assignlocation_ <- function(g,mindepth=0,maxdepth=Inf){
   ret=matrix(NA,nrow=length(g$nl),ncol=2)
   nnodes=length(g$nl)
   node=g$root
+  
+  checkAlive <- function(i){
+    C1 <- g$nl[[i]]$tmp == 1 
+    if(any(is.na(g$nl[[i]]$children))) C2 <- FALSE
+    else C2 <- any(sapply(g$nl[[i]]$children, function(c) g$nl[[c]]$tmp == 0))
+    return(C1 && C2)}
+  
   for(i in 1:length(g$nl)) g$nl[[i]]$tmp=0 # tracks completed
   mydepth=function(x){
     ifelse(is.na(x),0,min(max(mindepth,x),maxdepth))
   }
+  i = 0
   fin = FALSE
   while(fin == FALSE){
-    nnodes = nnodes - 1
+
     if(node == g$root) {t0 <- 0
     g$nl[[node]]$t = 0
+    g$nl[[node]]$p = 0
+    g$nl[[node]]$tmp = 1
     }else{t0 <- g$nl[[node]]$t}
-
-    
     
     if(any(!is.na(g$nl[[node]]$children))){
       children <- g$nl[[node]]$children
       for(c in children){
         depth = t0 + mydepth(g$nl[[c]]$d)
         if(g$nl[[c]]$tmp == 0) {g$nl[[c]]$t = depth}
+        i = i+1
+        g$nl[[c]]$p = i
         g$nl[[c]]$tmp = 1
       }
     }
-    
-    for(j in nnodes:1){
-      if(j==1 && g$nl[[1]]$tmp == 1) {fin = TRUE
-        break}
-      if(g$nl[[j]]$type != "spare" && g$nl[[j]]$tmp == 1){
-        node = j
-        break}
-
-    }
+    alive <- (1:nnodes)[sapply(1:nnodes,checkAlive)] 
+    if(length(alive) == 0) {fin = TRUE
+      break}
+    node = alive[1]
+    next
+    #for(j in alive){
+      # print(paste("j:",j, "tmp:", g$nl[[j]]$tmp))
+      # if(j==1 && g$nl[[1]]$tmp == 1) {fin = TRUE
+      # break}
+      #if(g$nl[[j]]$type != "spare" && g$nl[[j]]$tmp == 1){
+       # node = j
+       #break}
+    #}
   }
   g
 }
 
+c_get_<-function(g,n,what="d"){
+  ## Get edge properties from a parent node n to either left or right child
+  # if(getleft & is.na(n$cl)) return(NULL)
+  #  if((!getleft) & is.na(n$cr)) return(NULL)
+  
+  # ####### Special cases for mixture nodes
+  # if((!getleft) & (n$type=="mixture") & (what=="d")) return(0) # Special case: mixture edges have d=0 on the right
+  #if(n$type=="mixture") stop("mixture nodes not implemented")
+  
+  if(any(is.na(n$children))) return(NULL)  
+  if(what == "d"){
+    children <- n$children
+    d_vector <- sapply(children, function(c){g$nl[[c]]$d})
+    return(d_vector)}
+  
+  if(what == "w"){
+    children <- n$children
+    w_vector <- sapply(children, function(c){g$nl[[c]]$w})
+    return(w_vector)}
+  
+  if(what == "mix"){
+    if(n$type=="mixture") {
+      return(c(0,1))
+    }
+    else if(n$type=="split"){
+      nchildren <- length(n$children)
+      return(rep(0,nchildren))
+    }
+  }
+  
+  ## Get the child node
+  # if(getleft) {tn=g$nl[[n$cl]]
+  # }else tn=g$nl[[n$cr]]    
+  # if((what=="w") & (!is.na(tn$pr))) {
+  #   ## Special case: mixture edges have 1-w to the left parent and w to the right parent
+  #   if(tn$pr==n$i) {return(tn[[what]])
+  #   }else return(1-tn[[what]])
+  # }
+  # 
+  # ## Otherwise normal
+  # if(getleft) return(g$nl[[n$cl]][[what]])
+  # return(g$nl[[n$cr]][[what]])
+}
 
-edges.cg<-function(g){
+
+
+edges.cg_<-function(g){
   ## Extract properties of all edges as a data frame
-  edge.length=do.call("c",
-                      lapply(rev(g$nl[g$internal]),function(n){
-                        c(c_get(g,n,TRUE,"d"),
-                          c_get(g,n,FALSE,"d"))
-                      })
-  )
-  edge.w=do.call("c",
-                 lapply(rev(g$nl[g$internal]),function(n){
-                   c(c_get(g,n,TRUE,"w"),
-                     c_get(g,n,FALSE,"w"))
-                 })
-  )
+  edge.length=do.call("c", lapply(rev(g$nl[g$internal]),function(n){c_get_(g,n,"d")}))
+  
+  edge.w=do.call("c", lapply(rev(g$nl[g$internal]),function(n){c_get_(g,n,"w")}))
+  
   edge=do.call("rbind",
                lapply(rev(g$nl[g$internal]),function(n){
                  tr=c()
-                 if(!is.na(n$cl)) tr= rbind(tr,c(n$id,n$cl))
-                 #if(!is.na(n$cr)) tr= rbind(tr,c(n$id,n$cr))
+                 if(any(!is.na(n$children))) tr= cbind(tr,n$id,n$children)
                  tr
                })
   )
-  edge.ismix=do.call("c",
-                     lapply(rev(g$nl[g$internal]),function(n){
-                       pr=c(c_get(g,n,TRUE,"pr"),
-                            c_get(g,n,FALSE,"pr"))
-                       pr[is.na(pr)]=FALSE
-                       as.numeric(pr==n$id)
-                     })
-  )
+  
+  edge.ismix=do.call("c", lapply(rev(g$nl[g$internal]),function(n){c_get_(g,n,"mix")}))
+  
   colnames(edge)=c("parent","child")
   as.data.frame(cbind(edge,
                       weight=edge.w,
                       length=edge.length,
-                      mix=edge.ismix))
+                      #mix = rep(0,length(g$nl)-1)
+                      mix=edge.ismix
+  ))
 }
 
 
-tg0 <- simCoal_(4, labels=c("A","B","C","O"), times = "coal",outgroup="O")
-x <- assignlocation_(tg0)
-plot_.cg(tg0)
-
-printTimes(x)
-
-printFamily(x)
-
-edges
-
-g = simCoal(4, labels=c("A","B","C","O"), times = "coal",outgroup="O")
-
-x <- assignlocation(g)
-edges.cg(x)
-
-g$nl[[7]]$d
-
-printDepths(g)
-
-printTimes(g)
-
-printDepths(x)
-
-printTimes(x)
-
-plot(g)
-
-
-
-plot_.cg=function(g,ref=g,arrows.length=0.1,edges=NULL,
+plot.cg_=function(g,ref=g,arrows.length=0.1,edges=NULL,
                   arrows.col=c("grey","red"),
                   text.col=c("darkgrey","darkred"),
                   digits=1,mindepth=1e-2,maxdepth=Inf,rightalign=FALSE,
@@ -429,7 +417,7 @@ plot_.cg=function(g,ref=g,arrows.length=0.1,edges=NULL,
   ## Plot without requiring igraph
   if(!keeplocation) g=assignlocation_(g,mindepth,maxdepth)
   if(all(is.null(edges))){
-    edges=edges.cg(g)
+    edges=edges.cg_(g)
     edges[,"weight"]=format(edges[,"weight"],digits=digits)
   }
   tlayout=locationasmatrix(g)
@@ -438,7 +426,9 @@ plot_.cg=function(g,ref=g,arrows.length=0.1,edges=NULL,
   if(!all(is.null(tips))) labels[1:length(tips)]=tips
   if(!label.internal) labels[(length(g$tip.label)+1):length(labels)]=""
   if(show){
+    
     plot(tlayout,type="n",xlab="",ylab="",axes=FALSE,...)
+    
     if(is.na(showedges)&& any(edges[,"weight"]<0.99)) showedges=TRUE
     else if(is.na(showedges)) showedges=FALSE
     if(!label.mixture){
@@ -485,4 +475,71 @@ plot_.cg=function(g,ref=g,arrows.length=0.1,edges=NULL,
   order=tlayout[order(tlayout[1:g$n,"p"],decreasing=F),"label"]
   invisible(list(layout=tlayout,edges=edges,order=order))
 }
+
+
+printPos <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"p:", g$nl[[i]]$p))
+  }
+}
+
+printTmp <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"tmp:", g$nl[[i]]$tmp))
+  }
+}
+
+printType <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"type:", g$nl[[i]]$type))
+  }
+}
+
+
+printFamily <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"children:", g$nl[[i]]$children, "parent:",g$nl[[i]]$parents))
+  }
+}
+
+printDepths <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"d:", g$nl[[i]]$d))
+  }
+}
+
+printTimes <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"t:", g$nl[[i]]$t))
+  }
+}
+
+printPos <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"p:", g$nl[[i]]$p))
+  }
+}
+
+printTmp <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"tmp:", g$nl[[i]]$tmp))
+  }
+}
+
+printType <- function(g){
+  for(i in 1:length(g$nl)){
+    print(paste("node:",i,"type:", g$nl[[i]]$type))
+  }
+}
+
+################################################################################
+
+tg0 <- simCoal_(5,labels=c("A","B","C","D","O"),outgroup="O")
+tg1 <- mixedge_(tg0, 3,2,0.5,1)
+tg2 <- removemixedge_(tg1,i = 8)
+
+par(mfrow=c(2,2))
+plot.cg_(tg0, main="Original graph", )
+plot.cg_(tg1,main="Mixture graph")
+plot.cg_(tg2, main = "Mixture edge removed")
 
