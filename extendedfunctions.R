@@ -456,3 +456,58 @@ plot.cg_=function(g,ref=g,arrows.length=0.1,edges=NULL,
   invisible(list(layout=tlayout,edges=edges,order=order))
 }
 
+
+paths = function(edges, i){
+  idx = which(edges$child == i)
+  path = NULL
+  edges$new_weight = 0
+  dict_weights = list()
+  dict_weights[[as.character(i)]] = 1
+  
+  while (length(idx) > 0) {
+    E = edges[idx,]
+    
+    edge = paste0(E$child,"-", E$parent)
+    
+    for(k in 1:length(edge)) {
+      E[k,]$new_weight = E[k,]$weight*dict_weights[[as.character(E[k,]$child)]]
+      dict_weights[[as.character(E[k,]$parent)]] = E[k,]$new_weight
+    }    
+    
+    r = cbind(edge, E)
+    path = rbind(path,r)
+    
+    idx = which(edges$child %in% E$parent)
+  }
+  #path <- aggregate(new_weight ~ edge + parent + child + length + mix, data = path, FUN = sum)
+  paths = split(path, path$new_weight)
+  return(paths)
+}
+
+O = function(p_i, p_j){
+  overlap_i = p_i[p_i$edge %in% p_j$edge,]
+  overlap_j = p_j[p_j$edge %in% p_i$edge,]
+  wi = overlap_i$weight
+  wj = overlap_j$weight
+  ci = overlap_i$length
+  res = wi*wj*ci
+  return(sum(res))
+}
+
+Vij = function(Paths_i, Paths_j){
+  v = sum(sapply(Paths_i, function(path_i) sum(sapply(Paths_j, function(path_j) O(path_i, path_j)))))
+  return(v)
+}
+
+cov = function(g) {
+  ntips = g$n
+  cov = matrix(0, ntips, ntips)
+  edges = edges.cg_(g)
+  
+  cov = sapply(1:ntips, function(i) {
+    sapply(1:ntips, function(j) {
+      Vij(paths(edges, i), paths(edges, j))})
+  })
+  dimnames(cov) = list(g$tip.label, g$tip.label)
+  return(cov)
+}
