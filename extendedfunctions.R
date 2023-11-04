@@ -350,61 +350,6 @@ c_get_<-function(g,n,what="d"){
   }
 }
 
-edges.cg_(tg2)
-plot.cg_(tg2)
-n$mixchild
-
-
-tg0 <- simCoal_(4,labels=c("A","B","C","O"), times = "coal",outgroup="O")
-tg1 <- mixedge_(tg0, 3, 2, 0.5, w = 0.2)
-tg2<- mixedge_(tg1, 1, 2, 0.5, w = 0.3)
-
-y = removemixedge_(tg2, 8)
-
-plot.cg_(y)
-
-printWeight(tg1)
-
-printWeight(tg2)
-printWeight(assignweight(tg1))
-
-tg2$mix
-plot.cg_(tg2)
-
-edges.cg(g1)
-
-
-tg1$nl[[2]]$w[1]
-
-tg1$nl[[8]]
-
-printFamily(tg2)
-
-
-plot(g1)
-
-
-printWeight(tg1)
-
-c_get_(tg1,tg1$nl[[7]],"w")
-
-edges.cg_(tg1)
-
-plot.cg_(tg1)
-
-   ## Special case: mixture edges have w to the admix parent 1-w to the other parents
-  #   if(tn$pr==n$i) {return(tn[[what]])
-  #   }else return(1-tn[[what]])
-   #}
-  # 
-  # ## Otherwise normal
-  # if(getleft) return(g$nl[[n$cl]][[what]])
-  # return(g$nl[[n$cr]][[what]])
-#}
-
-
-
-
 
 edges.cg_<-function(g){
   ## Extract properties of all edges as a data frame
@@ -509,39 +454,67 @@ plot.cg_=function(g,ref=g,arrows.length=0.1,edges=NULL,
   invisible(list(layout=tlayout,edges=edges,order=order))
 }
 
-
-paths = function(edges, i){
-  idx = which(edges$child == i)
+paths = function(edges, i, root){
+  paths = list()
   path = NULL
-  edges$new_weight = 0
-  dict_weights = list()
-  dict_weights[[as.character(i)]] = 1
+  npaths = sum(edges$child == i)
+  path_weights = edges$weight[edges$child == i]
   
-  while (length(idx) > 0){
-    E = edges[idx,]
-    
-    edge = paste0(E$child,"-", E$parent)
-    
-    for(k in 1:length(edge)) {
-      E[k,]$new_weight = E[k,]$weight*dict_weights[[as.character(E[k,]$child)]]
-      dict_weights[[as.character(E[k,]$parent)]] = E[k,]$new_weight
-    }    
-    
-    r = cbind(edge, E)
-    path = rbind(path,r)
-    print(dict_weights)
-    idx = which(edges$child %in% E$parent)
+  for(k in 1:npaths){
+    idx = which(edges$child == i)[k]
+    while (length(idx) > 0){
+      E = edges[idx,]
+      edge = paste0(E$child,"-", E$parent)
+      r = cbind(edge, E)
+      path = rbind(path,r)    
+      if(E$parent == root) break
+      idx = which(edges$child %in% E$parent)
+    }
+    path$weight = path_weights[k]
+    paths[[as.character(path_weights[k])]] = path
+    path = NULL
   }
-  #path <- aggregate(new_weight ~ edge + parent + child + length + mix, data = path, FUN = sum)
-  paths = split(path, path$new_weight)
-  return(paths)
-}
+  return(paths)  
+}  
 
+paths2 = function(g, i){
+  root = g$root
+  ni = g$nl[[i]]
+  paths = list()
+  path = NULL
+  npaths = length(ni$w) # length(n$parents)
+  path_weights = ni$w
+  fin = FALSE
+  
+  for(k in 1:npaths){
+    node = ni
+    weight = path_weights[k]
+    
+    while (fin == FALSE){
+      parent = node$parents[k]
+      edge =  paste0(node$id,"-",parent) 
+      
+      if( g$nl[[parent]]$type == "mixture") {length = 0
+        }else length = node$d
+      
+      r = cbind(edge, as.numeric(length), as.numeric(weight))
+      path = rbind(path,r)    
+      
+      if(parent == root){ fin = TRUE
+        break}
+      
+      node = g$nl[[parent]]
+    }
+    paths[[as.character(path_weights[k])]] = path
+    path = NULL
+  }
+  return(paths)  
+}  
 
 O = function(p_i, p_j){
   overlap = p_i[p_i$edge %in% p_j$edge,]
-  wi = unique(p_i$new_weight)
-  wj = unique(p_j$new_weight)
+  wi = unique(p_i$weight)
+  wj = unique(p_j$weight)
   ci = overlap$length
   res = wi*wj*ci
   return(sum(res))
@@ -553,15 +526,22 @@ Vij = function(Paths_i, Paths_j){
 }
 
 ccov_dag_ = function(g, old=FALSE) {
+  root = g$root
   ntips = g$n
-  cov = matrix(0, ntips, ntips)
+  p = list(length = ntips)
+  
   if(old){edges = edges.cg(g)
   }else edges = edges.cg_(g)
   
+  for(i in 1:ntips){
+    p[[i]] = paths(edges, i,root)
+  }  
   cov = sapply(1:ntips, function(i) {
     sapply(1:ntips, function(j) {
-      Vij(paths(edges, i), paths(edges, j))})
+      Vij(p[[i]], p[[j]])})
   })
   dimnames(cov) = list(g$tip.label, g$tip.label)
   return(cov)
 }
+
+
