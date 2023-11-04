@@ -2,8 +2,48 @@
 
 setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project")
 source("mixfunctions.R")
-source("extendedfunctions.R")
 library("Clarity")
+
+## TO DO
+# Implement posterior distribution for number of children a node has for simcoal, with alpha parameter
+# Fix weights for removeedges_
+
+
+################################################################################
+
+tg0 <- simCoal_(4,labels=c("A","B","C","O"), times = "coal",outgroup="O")
+tg1 <- mixedge_(tg0, 3, 2, 0.5, 0.2)
+tg2<- mixedge_(tg1, 1, 2, 0.5, 0.8)
+
+par(mfrow=c(1,2))
+plot.cg_(tg1)
+plot.cg_(tg2)
+
+par(mfrow=c(1,2))
+plot.cg_(tg0, main="Original graph",showedges = T )
+plot.cg_(tg1,main="Mixture graph", showedges = T)
+plot.cg_(tg2, main = "Mixture graph 2")
+
+
+
+g0 <- simCoal(4,labels=c("A","B","C","O"), times = "coal",outgroup="O")
+g1 <- mixedge(g0, 3, 2, 0.5, 0.2)
+
+ccov_dag(g0)
+ccov_dag_(g0,old = T)
+
+
+
+ccov_dag(g1)
+ccov_dag_(g1,old = T)
+
+paths(edges.cg(g1), 2)
+
+plot(g1)
+ccov_tree_(tg0)
+
+
+################################################################################
 
 printType <- function(g){
   for(i in 1:length(g$nl)){
@@ -68,25 +108,4 @@ printTmp <- function(g){
 }
 
 
-################################################################################
-
-tg0 <- simCoal_(4,labels=c("A","B","C","O"),outgroup="O")
-tg1 <- mixedge_(tg0, 3,2,0.5,1)
-tg2 <- removemixedge_(tg1,i = 7)
-
-par(mfrow=c(2,2))
-plot.cg_(tg0, main="Original graph", )
-plot.cg_(tg1,main="Mixture graph")
-plot.cg_(tg2, main = "Mixture edge removed")
-
-
-
-## Add to this graph a "mixture edge" from node 2 to node 3
-tg1=mixedge_(tg0,2,3,0.5,0.2) ## Firstly with weight 0.2
-tg2=mixedge_(tg0,2,3,0.5,0.8) ## Seconldly with weight 0.8
-
-
-cov(tg0)
-
-ccov_dag(g)
 

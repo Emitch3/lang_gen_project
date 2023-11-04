@@ -6,7 +6,7 @@ source("mixfunctions.R")
 library("Clarity")
 
 
-cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA){
+cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA,mixchild=NA){
   ## This is the generic function to create or update a node
   ## Pass an id to create a new node
   ## Pass a cnode to update it
@@ -29,7 +29,8 @@ cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA){
            t=t,
            p=p,
            w=w,
-           type=type)
+           type=type,
+           mixchild=mixchild)
     class(r)="cnode"
     return(r)
   }
@@ -92,7 +93,7 @@ simCoal_<-function(n,times="coal",labels=paste0("t",1:n),outgroup=numeric()){
 }
 
 
-mixedge_<-function(g,source,target,alpha,w){
+mixedge_<-function(g,source,target,alpha,weight){
   ## Add a mixture edge to a clarity graph object
   
   #if(g$nl[[target]]$type == "mixture") {stop("ERROR: target cannot be a mixture node")}
@@ -113,7 +114,8 @@ mixedge_<-function(g,source,target,alpha,w){
                        d=g$nl[[source]]$d*(1-alpha),
                        t=(g$nl[[parsource]]$t - g$nl[[source]]$t)*alpha +  g$nl[[source]]$t,
                        w=1,
-                       type="mixture")
+                       type="mixture",
+                       mixchild = target)
   ################
   ## TODO: If the target already has a right parent, we need to create a new node
   
@@ -124,7 +126,10 @@ mixedge_<-function(g,source,target,alpha,w){
   ## Update the target
   l <- length(g$nl[[target]]$parents)
   
-  g$nl[[target]]=cnode(g$nl[[target]],w=g$nl[[target]]$w * w)
+  g$nl[[target]]=cnode(g$nl[[target]])
+  g$nl[[target]]$w[1] = g$nl[[target]]$w[1] - weight
+  g$nl[[target]]$w[length(g$nl[[target]]$w) + 1] = weight
+
   
   g$nl[[target]]$parents[l+1] = ti
   ## Update the source node (called source)
@@ -147,6 +152,7 @@ mixedge_<-function(g,source,target,alpha,w){
 
 
 removemixedge_ <- function(g,i,careful=TRUE){
+  warning("check weights")
   ## Remove the node at index i
   ## If we are careful, we expect a proper graph
   ## Otherwise we accept missing right children for "dangling" mixture nodes with no right child
@@ -307,6 +313,7 @@ assignlocation_ <- function(g,mindepth=0,maxdepth=Inf){
   g
 }
 
+
 c_get_<-function(g,n,what="d"){
   ## Get edge properties from a parent node n to either left or right child
   # if(getleft & is.na(n$cl)) return(NULL)
@@ -315,16 +322,16 @@ c_get_<-function(g,n,what="d"){
   # ####### Special cases for mixture nodes
   # if((!getleft) & (n$type=="mixture") & (what=="d")) return(0) # Special case: mixture edges have d=0 on the right
   #if(n$type=="mixture") stop("mixture nodes not implemented")
-  
+  #warning("weight not implemented properly")
   if(any(is.na(n$children))) return(NULL)  
   if(what == "d"){
     children <- n$children
     d_vector <- sapply(children, function(c){g$nl[[c]]$d})
     return(d_vector)}
   
-  if(what == "w"){
+  if((what == "w") && (n$type != "mixture")){
     children <- n$children
-    w_vector <- sapply(children, function(c){g$nl[[c]]$w})
+    w_vector <- sapply(children, function(c){g$nl[[c]]$w[1]})
     return(w_vector)}
   
   if(what == "mix"){
@@ -336,20 +343,66 @@ c_get_<-function(g,n,what="d"){
       return(rep(0,nchildren))
     }
   }
-  
-  ## Get the child node
-  # if(getleft) {tn=g$nl[[n$cl]]
-  # }else tn=g$nl[[n$cr]]    
-  # if((what=="w") & (!is.na(tn$pr))) {
-  #   ## Special case: mixture edges have 1-w to the left parent and w to the right parent
+  if((what == "w") && (n$type == "mixture")){
+    m = n$mixchild
+    idx = which(g$nl[[m]]$parents == n$id)
+    return(c(n$w, g$nl[[m]]$w[idx]))
+  }
+}
+
+edges.cg_(tg2)
+plot.cg_(tg2)
+n$mixchild
+
+
+tg0 <- simCoal_(4,labels=c("A","B","C","O"), times = "coal",outgroup="O")
+tg1 <- mixedge_(tg0, 3, 2, 0.5, w = 0.2)
+tg2<- mixedge_(tg1, 1, 2, 0.5, w = 0.3)
+
+y = removemixedge_(tg2, 8)
+
+plot.cg_(y)
+
+printWeight(tg1)
+
+printWeight(tg2)
+printWeight(assignweight(tg1))
+
+tg2$mix
+plot.cg_(tg2)
+
+edges.cg(g1)
+
+
+tg1$nl[[2]]$w[1]
+
+tg1$nl[[8]]
+
+printFamily(tg2)
+
+
+plot(g1)
+
+
+printWeight(tg1)
+
+c_get_(tg1,tg1$nl[[7]],"w")
+
+edges.cg_(tg1)
+
+plot.cg_(tg1)
+
+   ## Special case: mixture edges have w to the admix parent 1-w to the other parents
   #   if(tn$pr==n$i) {return(tn[[what]])
   #   }else return(1-tn[[what]])
-  # }
+   #}
   # 
   # ## Otherwise normal
   # if(getleft) return(g$nl[[n$cl]][[what]])
   # return(g$nl[[n$cr]][[what]])
-}
+#}
+
+
 
 
 
@@ -388,7 +441,7 @@ plot.cg_=function(g,ref=g,arrows.length=0.1,edges=NULL,
                   label.nonmixture=TRUE,
                   label.internal=TRUE,
                   labels.col="black",
-                  showedges=NA,
+                  showedges=TRUE,
                   keeplocation=FALSE,
                   lwd=1,textdelta=0,
                   format=c("triangular","rectangular"),rdelta=0.1,rdelta2=0.1,vadj.edge=0.2,
@@ -464,7 +517,7 @@ paths = function(edges, i){
   dict_weights = list()
   dict_weights[[as.character(i)]] = 1
   
-  while (length(idx) > 0) {
+  while (length(idx) > 0){
     E = edges[idx,]
     
     edge = paste0(E$child,"-", E$parent)
@@ -476,7 +529,7 @@ paths = function(edges, i){
     
     r = cbind(edge, E)
     path = rbind(path,r)
-    
+    print(dict_weights)
     idx = which(edges$child %in% E$parent)
   }
   #path <- aggregate(new_weight ~ edge + parent + child + length + mix, data = path, FUN = sum)
@@ -484,12 +537,12 @@ paths = function(edges, i){
   return(paths)
 }
 
+
 O = function(p_i, p_j){
-  overlap_i = p_i[p_i$edge %in% p_j$edge,]
-  overlap_j = p_j[p_j$edge %in% p_i$edge,]
-  wi = overlap_i$weight
-  wj = overlap_j$weight
-  ci = overlap_i$length
+  overlap = p_i[p_i$edge %in% p_j$edge,]
+  wi = unique(p_i$new_weight)
+  wj = unique(p_j$new_weight)
+  ci = overlap$length
   res = wi*wj*ci
   return(sum(res))
 }
@@ -499,10 +552,11 @@ Vij = function(Paths_i, Paths_j){
   return(v)
 }
 
-cov = function(g) {
+ccov_dag_ = function(g, old=FALSE) {
   ntips = g$n
   cov = matrix(0, ntips, ntips)
-  edges = edges.cg_(g)
+  if(old){edges = edges.cg(g)
+  }else edges = edges.cg_(g)
   
   cov = sapply(1:ntips, function(i) {
     sapply(1:ntips, function(j) {
