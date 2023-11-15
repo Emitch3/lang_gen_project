@@ -319,13 +319,14 @@ c_get_<-function(g,n,what="d"){
   # if(getleft & is.na(n$cl)) return(NULL)
   #  if((!getleft) & is.na(n$cr)) return(NULL)
   
-  # ####### Special cases for mixture nodes
-  # if((!getleft) & (n$type=="mixture") & (what=="d")) return(0) # Special case: mixture edges have d=0 on the right
-  #if(n$type=="mixture") stop("mixture nodes not implemented")
-  #warning("weight not implemented properly")
+
   if(any(is.na(n$children))) return(NULL)  
   if(what == "d"){
     children <- n$children
+    if(n$type == "mixture"){ # Special case: mixture edges have d=0 to target node
+      c1 = children[1]
+      return(c(g$nl[[c1]]$d ,0))
+    }
     d_vector <- sapply(children, function(c){g$nl[[c]]$d})
     return(d_vector)}
   
@@ -475,7 +476,8 @@ paths = function(edges, i, root){
     path = NULL
   }
   return(paths)  
-}  
+}
+
 
 paths2 = function(g, i){
   root = g$root
@@ -509,7 +511,7 @@ paths2 = function(g, i){
     path = NULL
   }
   return(paths)  
-}  
+}
 
 O = function(p_i, p_j){
   overlap = p_i[p_i$edge %in% p_j$edge,]
@@ -543,5 +545,10 @@ ccov_dag_ = function(g, old=FALSE) {
   dimnames(cov) = list(g$tip.label, g$tip.label)
   return(cov)
 }
+
+
+
+
+
 
 
