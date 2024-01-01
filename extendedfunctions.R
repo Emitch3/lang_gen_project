@@ -1,6 +1,3 @@
-
-
-
 setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project")
 source("mixfunctions.R")
 library("Clarity")
@@ -36,8 +33,7 @@ cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA,mixch
   }
 }
 
-
-simCoal_<-function(n,times="coal",labels=paste0("t",1:n),outgroup=numeric()){
+simCoal_<-function(n,times="coal", alpha = 0.75, labels=paste0("t",1:n),outgroup=numeric()){
   ## Simulate a coalescent tree in the "clarity graph" framework
   ## Returns a "clarity graph" object
   nodes = list()
@@ -49,7 +45,8 @@ simCoal_<-function(n,times="coal",labels=paste0("t",1:n),outgroup=numeric()){
   fin = FALSE
   for(i in n:2){
     ii <- length(nodes) + 1    
-    nChildren <- max(2,sample(1:length(alive), 1))
+    if(length(alive) < 3) nChildren = 2
+      else  nChildren <-  sample(c(2,3), 1, prob = c(alpha, 1 - alpha)) #max(2,sample(1:length(alive), 1))
     clist <- sample(alive,nChildren)
     
     if(times == "coal"){
@@ -93,10 +90,13 @@ simCoal_<-function(n,times="coal",labels=paste0("t",1:n),outgroup=numeric()){
 }
 
 
+
 mixedge_<-function(g,source,target,alpha,weight){
-  ## Add a mixture edge to a clarity graph object
+  ## Add a mixture edge to a graph 
+  if(g$nl[[target]]$type == "mixture") {stop("ERROR: target cannot be a mixture node")}
   
-  #if(g$nl[[target]]$type == "mixture") {stop("ERROR: target cannot be a mixture node")}
+  # forbid sibling admixture
+  #if(g$nl[[target]]$parent[1] == g$nl[[source]]$parent[1]) {stop("ERROR: cannot have admixture between siblings")}
   
   if(length(g$spare)>0){
     ti=tail(g$spare,1)
@@ -116,12 +116,7 @@ mixedge_<-function(g,source,target,alpha,weight){
                        w=1,
                        type="mixture",
                        mixchild = target)
-  ################
-  ## TODO: If the target already has a right parent, we need to create a new node
-  
-  #if(!is.na(g$nl[[target]]$pr)){
-  #  stop("Unimplemented exception: target would have three parents!")
-  #}
+
   
   ## Update the target
   l <- length(g$nl[[target]]$parents)
@@ -198,6 +193,7 @@ removemixedge_ <- function(g,i,careful=TRUE){
 }
 
 
+
 tipsunder_<-function(g,i,w=FALSE){
   ## Return the set of tips underneath a specified node
   ## if w (weighted) return this as a matrix of the weight for tip t (rows) under node i
@@ -238,9 +234,6 @@ tipsunder_<-function(g,i,w=FALSE){
 }
 
 
-
-
-
 ccov_tree_<-function(g){
   ## Compute the induced covariance for a tree-like g
   ## Weightings are ignored
@@ -257,8 +250,6 @@ ccov_tree_<-function(g){
   }
   c
 }
-
-
 
 
 assignlocation_ <- function(g,mindepth=0,maxdepth=Inf){
@@ -455,6 +446,7 @@ plot.cg_=function(g,ref=g,arrows.length=0.1,edges=NULL,
   invisible(list(layout=tlayout,edges=edges,order=order))
 }
 
+
 paths = function(edges, i, root){
   paths = list()
   path = NULL
@@ -477,6 +469,7 @@ paths = function(edges, i, root){
   }
   return(paths)  
 }
+
 
 
 paths2 = function(g, i){
@@ -522,10 +515,14 @@ O = function(p_i, p_j){
   return(sum(res))
 }
 
+
+
 Vij = function(Paths_i, Paths_j){
   v = sum(sapply(Paths_i, function(path_i) sum(sapply(Paths_j, function(path_j) O(path_i, path_j)))))
   return(v)
 }
+
+
 
 ccov_dag_ = function(g, old=FALSE) {
   root = g$root
@@ -548,6 +545,62 @@ ccov_dag_ = function(g, old=FALSE) {
 
 
 
+ctree_loss2_<-function(gref,dataref,center=FALSE){
+  ## Evaluate the loss for a parameterised graph of class cg, NOT a cglist
+  pred<-ccov_dag_(gref)
+  if(center){
+    pred=c_Center(pred)
+    dataref=c_Center(dataref)
+  }
+  dataref=dataref[gref$tip.label,gref$tip.label]
+  loss<-sum(na.omit(as.numeric((pred-dataref)^2)))
+  return(loss)
+}
+
+
+get_weightmatrix = function(g) {
+  edges = edges.cg_(g)
+  p = NA
+  for(i in g$tips) {p[[i]] = paths(edges, i, g$root)}
+  # make dictionary mapping edges to column numbers
+  dict = list()
+  l = 1
+  for(i in 1:length(g$nl)){
+    node = g$nl[[i]]
+    if(node$id == g$root) next
+    parents = node$parents
+    for(j in 1:length(parents)){
+      parent = parents[j]
+      edge =  paste0(node$id,"-",parent)
+      dict[as.character(edge)] = l
+      l = l + 1
+    }
+  }
+  W = NULL
+  for(i in g$tips){
+    rowvec = NULL
+    for(j in 1:(length(g$nl)-1 + length(g$mix))) rowvec[j] = 0
+    for(k in 1:length(p[[i]])){
+      for (l in 1:length(p[[i]])){
+        overlap = p[[i]][[k]]$edge[ p[[i]][[k]]$edge %in% p[[i]][[l]]$edge]
+        index = as.numeric(dict[overlap])
+        rowvec[index] = as.numeric(rowvec[index]) + unique(p[[i]][[k]]$weight)*unique(p[[i]][[l]]$weight)
+        #print(c(overlap, index, unique(p[[i]][[k]]$weight)*unique(p[[i]][[l]]$weight)))
+      }
+    }
+    W = rbind(W,unlist(rowvec))
+  }
+  colnames(W) = sort(names(dict))
+  return(W)
+}
+
+
+
+find_lengths = function(g){
+  V = ccov_dag_(g)
+  W = get_weightmatrix(g)
+  sol = t(W)%*%solve(W%*%t(W))%*%diag(V)
+  return(sol)}
 
 
 
