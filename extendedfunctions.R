@@ -604,4 +604,215 @@ find_lengths = function(g){
 
 
 
+mypruneregraft_ = function(g,source,target,careful=FALSE){
+  ## prunes source node branch and attaches it to the target node branch
+  
+  ## Run this ONLY on type=="split" nodes!
+  gstart=g
+  psourceroot=FALSE
+  ptargetroot=FALSE
+  
+  ## Parent of source needs removing
+  ptarget=g$nl[[target]]$parent[1] # non-admix parent of target
+  psource=g$nl[[source]]$parent[1] # non-admix parent of source. This node is to be moved to the target branch
+  
+  ocsource = g$nl[[psource]]$children 
+  ocsource = ocsource[ocsource!=source] # siblings of source node
+  
+  ppsource=g$nl[[psource]]$parents # grandparent of source, will become parent to other siblings of source node
+  
+  if(ocsource==target) {
+    if(length(ocsource) = 1) {print(paste("source",source,"and target",target,"have same bifurcating parent",psource))
+      return(g)}
+    else if(!is.na(ppsource)){ # Deal with trifucating node case
+      if(length(g$spare)>0)
+    }    
+  }
+  if(is.na(ppsource) ) {
+    print(paste("NOTE: parent of source is the root ( node",psource,")"))
+    psourceroot=TRUE
+    ## psource will become internal
+    g$nl[[psource]]$w = 1
+    ## ocsource will become the root
+    g$nl[[ocsource]]$d = NA
+    g$nl[[ocsource]]$parents[1] = NA
+    g$root=ocsource
+  }else{
+    ## Update the other child of the parent of the source
+    g$nl[[ocsource]]$d = g$nl[[ocsource]]$d + g$nl[[psource]]$d
+    g$nl[[ocsource]]$parent[1] = ppsource
+    g$nl[[ppsource]]$children = c(g$nl[[ppsource]]$children[g$nl[[ppsource]]$children != psource],ocsource)
+  }
+  
+  # ## Update the parent of the target
+  if(is.na(ptarget)) print(paste("parent of target is the root ( node",ptarget),")")
+  
+  g$nl[[ptarget]]$children = c(g$nl[[ptarget]]$children[g$nl[[ptarget]]$children != target], psource) 
+  
+  ## Update the split node, the old parent node
+  g$nl[[psource]]$d=g$nl[[target]]$d/2
+  g$nl[[psource]]$children = c(target, source)
+  g$nl[[psource]]$parents[1] = ptarget
+  
+  ## Update the target and source
+  g$nl[[target]]$d=g$nl[[target]]$d/2
+  g$nl[[target]]$parents[1] = psource    
+  g$nl[[source]]$parents[1] = psource
+  ## Done!
+  if(careful) {
+    if(!checkgraph(g)){
+      print(paste("Moving",source,"to",target))
+      print(g)
+      stop("Created invalid graph!")
+    }
+  }
+  g
+}
+
+getp_<-function(g){
+  if(is(g,"cglist")) return(getp(g[[1]]))
+  ## Extracts the indices of parameters of each type
+  driftp=(1:length(g$nl))
+  driftp=driftp[!driftp%in%g$root]
+  if(length(g$mix)>0)
+    for(i in g$mix) {
+      driftp=driftp[!driftp%in%g$nl[[i]]$children[1]]
+    }
+  mixp=g$mix
+  list(drift=driftp,mix=mixp)
+}
+
+npars_<-function(g){
+  ## Extract the number of each class of parameter, plus the total
+  if(is(g,"cglist")){
+    np=npars(g[[1]])
+    return(np)
+  }
+  p<-getp_(g)
+  ret=c(nd=length(p$drift),
+        nm=length(p$mix),
+        tot=0)
+  ret["tot"]=ret["nd"]+ret["nm"]
+  return(ret)
+}
+
+
+transformpars_<-function(g,pars,inv=F){
+  ## Transform parameters from R to their required ranges
+  if(is(g,"cglist")){
+    np=npars_(g)
+    res=lapply(1:length(g),function(i){
+      tpars=pars[(i-1)*np["tot"]+(1:np["tot"])]
+      transformpars(g[[i]],tpars,inv)
+    })
+    return(do.call("c",res))
+  }
+  np=npars_(g)
+  if(np["tot"] != length(pars)) stop("Invalid parameterisation")
+  for(i in 1:np["nd"]) pars[i] = driftscale(pars[i],inv=inv)
+  if(np["nm"]>0) for(i in 1:np["nm"]) pars[np["nd"]+i] = mixscale(pars[np["nd"] + i],inv=inv)
+  pars
+}
+
+parameterise_<-function(g,pars,transform=TRUE,n=NA){
+  ## Take parameters and put them in their correct place in g
+  ## Optionally, treat these parameters as coming from R and transform them to their required ranges
+  ## If we provide enough pars to parameterise multiple graphs, we return a list of them, or optionally via n, a specific one
+  p=getp_(g)
+  np=npars_(g)
+  ng=length(pars)/np["tot"]
+  if(floor(ng)!=ng) stop("Invalid parameterisation")
+  if(!is(g,"cglist")){
+    g=list(g)
+    class(g)="cglist"
+  }
+  ret=lapply(1:ng,function(i){
+    tg=g[[i]]
+    tpars=pars[(i-1)*np["tot"] + (1:np["tot"]) ]
+    if(transform) tpars=transformpars_(tg,tpars)
+    for(j in 1:np["nd"])  tg$nl[[ p$drift[j] ]]$d = tpars[j]
+    if(np["nm"]>0) for(j in 1:np["nm"]) tg$nl[[ tg$nl[[p$mix[j]]]$children[2] ]]$w = tpars[j+np["nd"]]
+    tg
+  })
+  for(i in 1:ng) if(length(g[[i]]$mixparmap)>0){
+    ii= g[[i]]$mixparmap
+    for(j in 1:np["nm"]) {
+      ret[[i]]$nl[[ ret[[i]]$nl[[p$mix[j]]]$children[2] ]]$w =
+        ret[[ii]]$nl[[ ret[[ii]]$nl[[p$mix[j]]]$children[2] ]]$w
+    }
+  }
+  if(length(ret)==1) {
+    if(is.na(n)) n=1
+    return(ret[[n]])
+  }
+  class(ret)="cglist"
+  return(ret)
+}
+
+
+isvalidregraftpair_<-function(g,swap){
+  ## Asks: is swap[1] -> swap[2] a valid prune pair?
+  done=TRUE
+  ## Reject if:
+  ## nodes share a parent
+  if((!is.na(g$nl[[swap[1]]]$parents[1]))&&(!is.na(g$nl[[swap[2]]]$parents[1]))) if(g$nl[[swap[1]]]$parents[1]==g$nl[[swap[2]]]$parents[1]) done=FALSE
+  ## The target is the parent of the source
+  if((!is.na(g$nl[[swap[1]]]$parents[1])) && (g$nl[[swap[1]]]$parents[1]==swap[2])) done=FALSE
+  ## The target is a descendent of the source
+  if(swap[2] %in% nodesunder_(g,swap[[1]])) done=FALSE
+  ## The source is a descendent of the target
+  if(swap[1] %in% nodesunder_(g,swap[[2]])) done=FALSE
+  ## Either is an outgroup
+  if(length(g$outgroup)>0){
+    tog=which(g$tip.label==g$outgroup)
+    if(any(swap %in%tog)) done=FALSE
+    ## The root does not have the outgroup
+    if(all(g$nl[[g$root]]$children !=tog)) done=FALSE
+  }
+  return(done)
+}
+
+
+nodesunder_<-function(g,i,visited=numeric()){
+  r=c()
+  if(i %in% visited) return(numeric()) #stop(paste("ERROR in nodesunder: node",i,"has already been visited!"))
+  if(all(!is.na(g$nl[[i]]$children))) {
+    for(c in g$nl[[i]]$children){
+      j=nodesunder_(g,c,visited=c(visited,i))
+      r=c(r,j)
+    }
+  }
+  r=c(r,i)
+  return(unique(r))
+}
+
+
+randomregraftpair_<-function(g,maxtries=400,...){
+  ## Return random nodes that are not siblings
+  ## Careful not to go crazy if there are no valid options...
+  done=FALSE
+  ntries=0
+  while(!done){
+    #        print(paste("... random prune pair try",ntries)) ## DEBUG
+    ret=randomnodes(g,...)
+    #        print(paste(ret,collapse=",")) ## DEBUG
+    for(i in 1:length(ret)) {
+      while(TRUE){
+        ii=ret[i]
+        n=g$nl[[ii]]
+        targetsparentismixture = (!is.na(n$parents[1])) && (g$nl[[n$parents[1]]]$type=="mixture")
+        if(targetsparentismixture) ret[i]=n$parents[1]
+        else break;
+      }
+    }
+    done=isvalidregraftpair_(g,ret)
+    ntries=ntries+1
+    
+    if(ntries==maxtries) stop("Error! Reached maximum number of attempts to find valid tree move!")
+  }
+  return(ret)
+}
+
+
+randomregraftpair_(tg0)
 

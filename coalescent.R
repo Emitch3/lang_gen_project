@@ -14,13 +14,15 @@ library("Clarity")
 
 ################################################################################
 
-tg0 = simCoal_(6,labels=c("A","B","C", "D", "E","O"), alpha = 0.75,outgroup="O")
+tg0 = simCoal_(4,labels=c("A","B","C", "O"), alpha = 0.75,outgroup="O")
 plot.cg_(tg0)
 
 tg1 <- mixedge_(tg0, 3, 2, 0.5, 0.2)
+plot.cg_(tg1)
+
 tg2 <- mixedge_(tg1, 1, 2, 0.5, 0.2)
 #tg3 <- removemixedge_(tg2, 8)
-plot.cg_(tg0)
+
 #plot.cg_(tg3)
 
 edges.cg_(tg1)
@@ -107,159 +109,69 @@ source = 2
 target = 1
 
 
+################################################################################
+
+
+reversemixture<-function(g,mixrev){
+  ####### INCOMPLETE
+  if(is(g,"cglist")){
+    ret=lapply(g,reversemixture,mixrev=mixrev)
+    class(ret)="cglist"
+    return(ret)
+  }
+  ## Swap the role of mixrev (a mixture node) and the other parent of the target
+  target=g$nl[[mixrev]]$cr
+  opar= g$nl[[target]]$pl
+  if(opar==target) stop("reversemixture problem")
+  ## Swap at the parents of the target
+  isleftchild=(g$nl[[opar]]$cl==target)
+  if(isleftchild){
+    ochild=g$nl[[opar]]$cr
+  }else{
+    ochild=g$nl[[opar]]$cl
+  }
+  ## Find out the parent of the other child
+  paropar=g$nl[[opar]]$pl
+  ## Find out the parent of the mixrev
+  parmix=g$nl[[mixrev]]$pl
+  g$nl[[ochild]]$pl=paropar
+  parisleftchild=(g$nl[[paropar]]$cl==opar)
+  mixisleftchild=(g$nl[[parmix]]$cl==mixrev)
+  ## Reverse the children of the parents
+  if(parisleftchild){
+    g$nl[[paropar]]$cl=mixrev
+  }else{
+    g$nl[[paropar]]$cr=mixrev
+  }
+  g$nl[[mixrev]]$pl=paropar
+  if(mixisleftchild){
+    g$nl[[parmix]]$cl=opar
+  }else{
+    g$nl[[parmix]]$cr=opar
+  }
+  g$nl[[opar]]$pl=paropar
+  
+  ## tpl=g$nl[[target]]$pl
+  ## tpr=g$nl[[target]]$pr
+  ## ## Swap at the target
+  ## g$nl[[target]]$pl=tpr
+  ## g$nl[[target]]$pr=tpl
+  g
+}
+
+
+
+g0=simCoal(4,labels=c("A","B","C","O"),outgroup="O")
+
+g1=mixedge(g0,2,3,0.5,0.2) ## Firstly with weight 0.2
+plot(g1)
+
+g2 = reversemixture(g1, mixrev = 8)
+plot(g2)
 
 
 ################################################################################
 
-
-
-
-pruneregraft_ = function(g,source,target,careful=FALSE){
-  warning("May need debugging")
-  ## source = node to be moved
-  
-  ## prunes source node branch and attaches it to the target node branch
-  
-  ## Run this ONLY on type=="split" nodes!
-  gstart=g
-  
-  psourceroot=FALSE
-  ptargetroot=FALSE
-
-  ptarget=g$nl[[target]]$parent[1] # non-admix parent of target
-  
-  psource=g$nl[[source]]$parent[1] # non-admix parent of source. (This node may be removed)
-  
-  ocsource = g$nl[[psource]]$children 
-  ocsource = ocsource[ocsource!=source] # siblings of source node
-  
-  ppsource=g$nl[[psource]]$parents # grandparent of source (will become parent to other child of this parent)
-  
-  if(ocsource==target) { # is target sibling of source node?
-    print(paste("source",source,"and target",target,"have same parent",psource))
-    return(g)
-  }
-  
-  if(is.na(ppsource) ) {
-    print(paste("NOTE: parent of source is the root ( node",psource,")"))
-    psourceroot=TRUE
-    ## psource will become internal
-    g$nl[[psource]]$w = 1
-    ## ocsource will become the root
-    g$nl[[ocsource]]$d = NA
-    g$nl[[ocsource]]$parents = NA
-    g$root=ocsource
-  }else if(length(ocsource) == 1) {
-    ## Remove psource since can't have split node with only 1 child
-    g$nl[[ocsource]]$d = g$nl[[ocsource]]$d + g$nl[[psource]]$d
-    g$nl[[ocsource]]$parents = ppsource
-    
-    g$nl[[ppsource]]$children = c(g$nl[[ppsource]]$children[g$nl[[ppsource]]$children != psource],ocsource )
-    # update graph information
-    g$nl[[psource]] =cnode_(id = psource,children = NA, parents = NA, w=1,d=0,type="spare") 
-    g$mix=g$mix[-which(g$mix==psource)]
-    g$internal=g$internal[-which(g$internal==psource)]
-    g$spare=c(psource,g$spare)
-  }else{
-    g$nl[[psource]]$children = ocsource}  
-  
-  ## Update the parent of the target
-  if(is.na(ptarget)) print(paste("parent of target is the root ( node",ptarget),")")
-  
-  g$nl[[ptarget]]$children = c(g$nl[[ptarget]]$children, source)
-  
-  # targetisleftchild = (g$nl[[ptarget]]$cl==target)
-  # if(targetisleftchild){
-  #   g$nl[[ptarget]]$cl=psource
-  # }else{
-  #   g$nl[[ptarget]]$cr=psource
-  # }
-  
-  ## Update the split node, the old parent node
-  #g$nl[[psource]]$d=g$nl[[target]]$d/2
-  #g$nl[[psource]]$cl=target
-  #g$nl[[psource]]$cr=source
-  #g$nl[[psource]]$pl=ptarget
-  ## Update the target and source
-  
-  #g$nl[[target]]$d=g$nl[[target]]$d/2
-  g$nl[[target]]$parents = c( g$nl[[target]]$parents, psource)
-  g$nl[[source]]$parents=c(g$nl[[source]]$parents, psource )
-  
-  ## Done!
-  if(careful) {
-    if(!checkgraph(g)){
-      print(paste("Moving",source,"to",target))
-      print(g)
-      stop("Created invalid graph!")
-    }
-  }
-  g
-}
-
-
-
-mypruneregraft_ = function(g,source,target,careful=FALSE){
-  ## prunes source node branch and attaches it to the target node branch
-  
-  ## Run this ONLY on type=="split" nodes!
-  gstart=g
-  psourceroot=FALSE
-  ptargetroot=FALSE
-  
-  ## Parent of source needs removing
-  ptarget=g$nl[[target]]$parent[1] # non-admix parent of target
-  psource=g$nl[[source]]$parent[1] # non-admix parent of source. This node is to be moved to the target branch
-  
-  ocsource = g$nl[[psource]]$children 
-  ocsource = ocsource[ocsource!=source] # siblings of source node
-  
-  ppsource=g$nl[[psource]]$parents # grandparent of source, will become parent to other siblings of source node
-
-  if(ocsource==target) {
-    print(paste("source",source,"and target",target,"have same parent",psource))
-    return(g)
-  }
-  if(is.na(ppsource) ) {
-    print(paste("NOTE: parent of source is the root ( node",psource,")"))
-    psourceroot=TRUE
-    ## psource will become internal
-    g$nl[[psource]]$w = 1
-    ## ocsource will become the root
-    g$nl[[ocsource]]$d = NA
-    g$nl[[ocsource]]$parents[1] = NA
-    g$root=ocsource
-  }else{
-    ## Update the other child of the parent of the source
-    g$nl[[ocsource]]$d = g$nl[[ocsource]]$d + g$nl[[psource]]$d
-    g$nl[[ocsource]]$parent[1] = ppsource
-    g$nl[[ppsource]]$children = c(g$nl[[ppsource]]$children[g$nl[[ppsource]]$children != psource],ocsource)
-  }
-
-  # ## Update the parent of the target
-  if(is.na(ptarget)) print(paste("parent of target is the root ( node",ptarget),")")
-  
-  g$nl[[ptarget]]$children = c(g$nl[[ptarget]]$children[g$nl[[ptarget]]$children != target], psource) 
-  
-  ## Update the split node, the old parent node
-  g$nl[[psource]]$d=g$nl[[target]]$d/2
-  g$nl[[psource]]$children = c(target, source)
-  g$nl[[psource]]$parents[1] = ptarget
-  
-  ## Update the target and source
-  g$nl[[target]]$d=g$nl[[target]]$d/2
-  g$nl[[target]]$parents[1] = psource    
-  g$nl[[source]]$parents[1] = psource
-  ## Done!
-  if(careful) {
-    if(!checkgraph(g)){
-      print(paste("Moving",source,"to",target))
-      print(g)
-      stop("Created invalid graph!")
-    }
-  }
-  g
-}
 
 tg0 = simCoal_(4,labels=c("A","B","C","O"), alpha = 0.75,outgroup="O")
 plot.cg_(tg0)
