@@ -544,20 +544,6 @@ ccov_dag_ = function(g, old=FALSE) {
 }
 
 
-
-ctree_loss2_<-function(gref,dataref,center=FALSE){
-  ## Evaluate the loss for a parameterised graph of class cg, NOT a cglist
-  pred<-ccov_dag_(gref)
-  if(center){
-    pred=c_Center(pred)
-    dataref=c_Center(dataref)
-  }
-  dataref=dataref[gref$tip.label,gref$tip.label]
-  loss<-sum(na.omit(as.numeric((pred-dataref)^2)))
-  return(loss)
-}
-
-
 get_weightmatrix = function(g) {
   edges = edges.cg_(g)
   p = NA
@@ -595,14 +581,15 @@ get_weightmatrix = function(g) {
 }
 
 
-
-find_lengths = function(g){
-  V = ccov_dag_(g)
+get_depths = function(g, V){
+  #input topology g and covariance matrix and output depths
+  #V = ccov_dag_(g)
   W = get_weightmatrix(g)
   sol = t(W)%*%solve(W%*%t(W))%*%diag(V)
-  return(sol)}
+  return(sol)
+}
 
-
+get_depths
 
 mypruneregraft_ = function(g,source,target,careful=FALSE){
   ## prunes source node branch and attaches it to the target node branch
@@ -622,10 +609,11 @@ mypruneregraft_ = function(g,source,target,careful=FALSE){
   ppsource=g$nl[[psource]]$parents # grandparent of source, will become parent to other siblings of source node
   
   if(ocsource==target) {
-    if(length(ocsource) = 1) {print(paste("source",source,"and target",target,"have same bifurcating parent",psource))
+    if(length(ocsource) == 1) {print(paste("source",source,"and target",target,"have same bifurcating parent",psource))
       return(g)}
     else if(!is.na(ppsource)){ # Deal with trifucating node case
-      if(length(g$spare)>0)
+      if(length(g$spare)>0) 
+        print("multifurcating node to bifurcating node")
     }    
   }
   if(is.na(ppsource) ) {
@@ -670,7 +658,7 @@ mypruneregraft_ = function(g,source,target,careful=FALSE){
 }
 
 getp_<-function(g){
-  if(is(g,"cglist")) return(getp(g[[1]]))
+  if(is(g,"cglist")) return(getp_(g[[1]]))
   ## Extracts the indices of parameters of each type
   driftp=(1:length(g$nl))
   driftp=driftp[!driftp%in%g$root]
@@ -681,6 +669,7 @@ getp_<-function(g){
   mixp=g$mix
   list(drift=driftp,mix=mixp)
 }
+
 
 npars_<-function(g){
   ## Extract the number of each class of parameter, plus the total
@@ -772,7 +761,6 @@ isvalidregraftpair_<-function(g,swap){
   return(done)
 }
 
-
 nodesunder_<-function(g,i,visited=numeric()){
   r=c()
   if(i %in% visited) return(numeric()) #stop(paste("ERROR in nodesunder: node",i,"has already been visited!"))
@@ -784,6 +772,23 @@ nodesunder_<-function(g,i,visited=numeric()){
   }
   r=c(r,i)
   return(unique(r))
+}
+
+
+gparvec_<-function(g,invtrans=FALSE){
+  ## Extract the parameter vector from g
+  ## Optionally transform this into R
+  if(is(g,"cglist")){
+    r=lapply(g,gparvec,invtrans=invtrans)
+    return(do.call("c",r))
+  }
+  p=getp_(g)
+  np=npars_(g)
+  pars=numeric(np["tot"])
+  for(i in 1:length(p$drift)) pars[i] = g$nl[[ p$drift[i] ]]$d 
+  if(np["nm"]>0) for(i in 1:np["nm"])  pars[i+np["nd"]] = g$nl[[ g$nl[[p$mix[i]]]$cr ]]$w
+  if(invtrans) pars=transformpars(g,pars,T)
+  pars
 }
 
 
@@ -814,5 +819,160 @@ randomregraftpair_<-function(g,maxtries=400,...){
 }
 
 
-randomregraftpair_(tg0)
+mypruneregraftstep_<-function(g){
+  ## Do a complete prune/regraft step
+  if(is(g,"cglist")){
+    swap=randomregraftpair_(g[[1]])
+    gtest=lapply(g,function(x)mypruneregraft_(x,swap[1],swap[2]))
+    class(gtest)="cglist"
+  }else{
+    swap=randomregraftpair_(g)
+    gtest=mypruneregraft_(g,swap[1],swap[2])
+  }
+  #print(swap)
+  list(g=gtest,swap=swap,mixswap=NA)
+}
+
+
+dagstep_ <- function(g,data,control=defaultcontrol,freqs=c(1/3,1/3,1/3),verbose=FALSE,...){
+  ## Do one iteration of the graph
+  movetype=sample(1:3,1,prob=freqs)
+  if((is(g,"cglist")&&(length(g[[1]]$mix)==0)) ||
+     (is(g,"cg")&&(length(g$mix)==0)))movetype=1 # No mixture edges to worry about
+  if(verbose) print(paste("Proposing move of type",movetype,"..."))
+  if(movetype==1){
+    proposal=mypruneregraftstep_(g)
+  }else if(movetype==2){        
+    proposal=myregraftmixedgestep(g)
+  }else if(movetype==3){
+    proposal0=mypruneregraftstep(g)
+    proposal=myregraftmixedgestep(proposal0$g)
+    proposal$swap=proposal0$swap
+  }else stop("Invalid move type in dagstep?!")
+  if(verbose){
+    print(paste("proposal: movetype",movetype,
+                "swap:",paste(proposal$swap,collapse=","),
+                "mixswap:",paste(proposal$mixswap,collapse=",")))
+  }
+  
+  #inf=infergraphpar(proposal$g,ctree_loss,data,control=control,...)
+  #proposal$inf=inf
+  proposal[[1]]
+}
+
+
+infergraphpar_<-function(g,ctree_loss,
+                        data,
+                        lower=-5,
+                        method="L-BFGS-B",
+                        control=defaultcontrol,
+                        ...){
+  ## Infer a graph's best parameters
+  p= gparvec(g,invtrans=TRUE)
+  
+  lower=rep(lower,length(p))
+  opt=optim(p,ctree_loss,
+            gref=g,
+            method=method,
+            dataref=data,lower=lower,
+            control=control,...)
+  g=parameterise(g,opt$par)
+  list(g=g,par=opt$par,loss=opt$value)
+}
+
+
+ctree_loss2_<-function(gref,dataref,center=FALSE){
+  ## Evaluate the loss for a parameterised graph of class cg, NOT a cglist
+  pred<-ccov_dag_(gref)
+  #if(center){
+  #  pred=c_Center(pred)
+  #  dataref=c_Center(dataref)
+  #}
+  dataref=dataref[gref$tip.label,gref$tip.label]
+  loss<-sum(na.omit(as.numeric((pred-dataref)^2)))
+  return(loss)
+}
+
+
+infergraphpar_<-function(g,ctree_loss,
+                         data,
+                         lower=-5,
+                         method="L-BFGS-B",
+                         control=defaultcontrol,
+                         ...){
+  ## Infer a graph's best parameters
+  p = gparvec_(g,invtrans=F)
+  
+  lower=rep(lower,length(p))
+  opt=optim(p,ctree_loss2_,
+            gref=g,
+            method=method,
+            dataref=data,lower=lower,
+            control=control,...)
+  g=parameterise(g,opt$par)
+  list(g=g,par=opt$par,loss=opt$value)
+}
+
+
+infer_topo <- function(g0, data,maxiter=100,losstol=0.01, patience = 10){
+  p = get_depths(g0, data)
+  g = parameterise_(g0, p, transform = F)
+  
+  loss = ctree_loss2_(g,data)
+  losses=rep(NA,maxiter)
+  losses[1]=loss
+  
+  consecutive_loss_count = 0
+  
+  if(maxiter>1) for(i in 2:maxiter){
+    proposal=dagstep_(g,data)
+    newloss = ctree_loss2_(proposal,data)
+
+    if (newloss < loss){
+      g = proposal
+      loss = newloss
+    }
+    losses[i]=loss
+    
+    if (abs(losses[i] - losses[i - 1]) < losstol) {
+      consecutive_loss_count = consecutive_loss_count + 1
+    } else {
+      consecutive_loss_count = 0
+    }
+    
+    if (consecutive_loss_count >= patience) {
+      cat("Converged at iteration", i, "\n")
+      break
+    }
+    
+  }
+  return(list(g,loss, losses))
+}
+
+
+
+
+#infergraphpar_(g0,ctree_loss, data)[[2]]
+
+par(mfrow=c(1,2))
+
+tg1 = simCoal_(5,labels=c("A","B","C","D", "O"), alpha = 1,outgroup="O")
+plot.cg_(tg1)
+data = ccov_dag_(tg1)
+data
+
+
+
+g0 = simCoal_(5,labels=c("A","B","C","D", "O"), alpha = 1,outgroup="O")
+plot.cg_(g0)
+
+ctree_loss2_(g0,data)
+res = infer_topo(g0, data,maxiter = 30)
+res[[3]]
+g = res[[1]]
+plot.cg_(g)
+
+#g = infergraphpar_(g, ctree_loss,data)[[1]]
+
+ccov_dag_(g)
 

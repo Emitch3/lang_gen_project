@@ -63,14 +63,30 @@ ctree_loss2_(tg1,c)
 
 V = ccov_dag_(tg0)
 
-W = get_weightmatrix(tg0)
+par(mfrow=c(1,2))
 
-sol = find_lengths(tg0)
+tg0 = simCoal_(4,labels=c("A","B","C", "O"), alpha = 1,outgroup="O")
+tg1 = simCoal_(4,labels=c("A","B","C", "O"), alpha = 1,outgroup="O")
 
+plot.cg_(tg0)
+plot.cg_(tg1)
 
-find_lengths(tg2)
+data = ccov_dag_(tg1)
+data
 
-system.time(find_lengths(tg1))
+p = get_depths(tg1, data)
+p
+printDepths(tg1)
+
+y = parameterise_(tg1, pars = p, transform = F)
+
+ccov_dag_(y)
+data
+
+sum((ccov_dag_(y) - data)^2)
+
+plot.cg_(tg1)
+plot.cg_(y)
 
 
 edges.cg_(tg0)
@@ -202,8 +218,6 @@ regraftmixedge_<-function(g,i,source,target,alpha,w){
   g=mixedge_(g,source,target,alpha,w)
   g
 }
-
-
 
 XX = pruneregraft(tg0, source ,target, careful = F)
 
