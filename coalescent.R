@@ -14,59 +14,48 @@ library("Clarity")
 
 ################################################################################
 
-tg0 = simCoal_(4,labels=c("A","B","C", "O"), alpha = 0.75,outgroup="O")
-plot.cg_(tg0)
-
-tg1 <- mixedge_(tg0, 3, 2, 0.5, 0.2)
-plot.cg_(tg1)
-
-tg2 <- mixedge_(tg1, 1, 2, 0.5, 0.2)
-#tg3 <- removemixedge_(tg2, 8)
-
-#plot.cg_(tg3)
-
-edges.cg_(tg1)
-edges.cg_(tg3)
-
-#tg2<- mixedge_(tg1, 1, 5, 0.5, 0.3)
-
-par(mfrow=c(1,2))
-plot.cg_(tg0)
-plot.cg_(tg1)
-plot.cg_(tg2)
+## Simulate a 4 population model where there is an outgroup
+tg0 = simCoal_(4,labels=c("A","B","C", "O"), alpha = 1,outgroup="O")
+## Add to this graph a "mixture edge" from node 1 to node 3
+tg1 <- mixedge_(tg0, 1, 3, 0.5, 0.2)
 
 par(mfrow=c(1,2))
 plot.cg_(tg0, main="Original graph",showedges = T )
 plot.cg_(tg1,main="Mixture graph", showedges = T)
-plot.cg_(tg2, main = "Mixture graph 2")
+
+# simulate data
+data=ccov_dag_(tg1)
+
+## Make a random pair of alternative graphs
+trand0=simCoal_(4,labels=c("A","B","C","O"),outgroup="O")
+trand1=mixedge_(trand0,2,3,0.5,0.5)  ## Careful not to involve the outgroup
+
+plot.cg_(trand0, main="Alternative graph",showedges = T )
+plot.cg_(trand1,main="Alternative mixture graph", showedges = T)
+
+## Perform inference
+tinf1=infer_topo(trand0, data, maxiter = 30 ,verbose = T)
+ccov_dag_(tinf1[[1]])
+plot.cg_(tinf1[[1]])
+tinf1[[3]]
+
+
+
+g0 = tg1
+p = get_depths(g0, data)
+g = parameterise_(g0,format_params(g0,p) , transform = F)
+
+
+
+
+
+
 
 g0 <- simCoal(4,labels=c("A","B","C","O"), times = "coal",outgroup="O")
 g1 <- mixedge(g0, 6, 2, 0.5, 0.2)
 
-ccov_dag_(tg0)
-ccov_dag_(tg2)
 
-ccov_dag_(g0,old = T)
-
-ccov_dag(g1)
-ccov_dag_(g1,old = T)
-
-plot(g1)
-
-c = ccov_dag_(tg0)
-ccov_dag_(tg1)
-ccov_dag_(tg2)
-
-c_Center(c,d)
-
-ctree_loss2_(tg1,c)
-
-V = ccov_dag_(tg0)
-
-par(mfrow=c(1,2))
-
-tg0 = simCoal_(4,labels=c("A","B","C", "O"), alpha = 1,outgroup="O")
-tg1 = simCoal_(4,labels=c("A","B","C", "O"), alpha = 1,outgroup="O")
+tg1 = 
 
 plot.cg_(tg0)
 plot.cg_(tg1)
@@ -202,56 +191,6 @@ plot(g0)
 t = mypruneregraft(g0, source = 1, target = 3)
 plot(t)
 
-#pruneregraft_(tg1, source = )
-
-
-regraftmixedge_<-function(g,i,source,target,alpha,w){
-  if(is(g,"cglist")){
-    ret=lapply(g,function(x){
-      regraftmixedge_(x,i,source,target,alpha,w)
-    })
-    class(ret)="cglist"
-    return(ret)
-  }
-  ## Does a complete removal and replacement of a mixture edge, with specified parameters
-  if(!is.na(i)) g=removemixedge_(g,i)
-  g=mixedge_(g,source,target,alpha,w)
-  g
-}
-
-XX = pruneregraft(tg0, source ,target, careful = F)
-
-
-edges.cg_(g)
-edges.cg_(XX)
-plot.cg_(g)
-plot.cg_(XX)
-
-
-g0=simCoal(4,labels=c("A","B","C","O"),outgroup="O")
-g1=mixedge(g0,1,3,0.5,0.2) 
-
-gx = mypruneregraft(g = g1, source = 3, target = 1)
-
-plot(g1)
-plot(gx)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 ################################################################################
 
@@ -261,7 +200,7 @@ printType <- function(g){
   }
 }
 
-diag(V, nrow = 4, ncol = 4)
+
 printFamily <- function(g){
   for(i in 1:length(g$nl)){
     print(paste("node:",i,"children:", g$nl[[i]]$children, "parent:",g$nl[[i]]$parents))
@@ -270,7 +209,7 @@ printFamily <- function(g){
 
 printDepths <- function(g){
   for(i in 1:length(g$nl)){
-    print(paste("node:",i,"d:", g$nl[[i]]$d))
+    print(paste("node:",i, "parent node", g$nl[[i]]$parents, "d:", g$nl[[i]]$d))
   }
 }
 
