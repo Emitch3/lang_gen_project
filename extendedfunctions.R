@@ -4,9 +4,6 @@ library("Clarity")
 
 
 
-#### ERROR mypruneregraft - check parents updating correctly
-
-
 cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA,mixchild=NA){
   ## This is the generic function to create or update a node
   ## Pass an id to create a new node
@@ -570,8 +567,6 @@ get_weightmatrix = function(g) {
     for(k in 1:length(p[[i]])){
       for (l in 1:length(p[[i]])){
         overlap = p[[i]][[k]]$edge[ p[[i]][[k]]$edge %in% p[[i]][[l]]$edge] 
-        #print(overlap)
-        #print(dict[overlap])
         index = as.numeric(dict[overlap]) 
         rowvec[index] = as.numeric(rowvec[index]) + unique(p[[i]][[k]]$weight)*unique(p[[i]][[l]]$weight)
       }
@@ -864,7 +859,7 @@ infergraphpar_<-function(g,ctree_loss,
 myregraftmixedge_ <- function(g,i,source,target,alpha,w){
   if(is(g,"cglist")){
     ret=lapply(g,function(x){
-      myregraftmixedge(x,i,source,target,alpha,w)
+      myregraftmixedge_(x,i,source,target,alpha,w)
     })
     class(ret)="cglist"
     return(ret)
@@ -974,11 +969,33 @@ randomregraftmixture_<-function(g,add=FALSE,maxtries=200,...){
   ret=list(rem=rem,source=ret[1],target=ret[2],alpha=alpha,w=w)
   return(ret)
 }
+
+
+
+reversemixture_<-function(g){
+  ####### reverse mixture edge direction
+  if(is(g,"cglist")){
+    ret=lapply(g,reversemixture_)
+    class(ret)="cglist"
+    return(ret)
+  }
+
+  mixnodes = g$mix
+  if(length(mixnodes)==0) stop("Error: g has no mix edge")
+  mix = mixnodes[sample(1:length(mixnodes),1)]
+
+  g = myregraftmixedge_(g, i= mix, source = g$nl[[mix]]$children[2], 
+                        target = g$nl[[mix]]$children[1], 
+                        alpha = runif(1,0.01,0.5),
+                        w = g$nl[[ g$nl[[mix]]$children[2] ]]$w[2])
+  list(g=g,swap=NA,mixswap=NA)
+}
+
  
 
-dagstep_ <- function(g,data,control=defaultcontrol,freqs=c(1/3,1/3,1/3),verbose=FALSE,...){
+dagstep_ <- function(g,data,control=defaultcontrol,freqs=c(1/4,1/4,1/4,1/4),verbose=FALSE,...){
   ## Do one iteration of the graph
-  movetype=sample(1:3,1,prob=freqs)
+  movetype=sample(1:4,1,prob=freqs)
   if((is(g,"cglist")&&(length(g[[1]]$mix)==0)) ||
      (is(g,"cg")&&(length(g$mix)==0)))movetype=1 # No mixture edges to worry about
   if(verbose) print(paste("Proposing move of type",movetype,"..."))
@@ -990,54 +1007,15 @@ dagstep_ <- function(g,data,control=defaultcontrol,freqs=c(1/3,1/3,1/3),verbose=
     proposal0=mypruneregraftstep_(g)
     proposal=myregraftmixedgestep_(proposal0$g)
     proposal$swap=proposal0$swap
+  }else if(movetype==4){
+    proposal=reversemixture_(g)
   }else stop("Invalid move type in dagstep?!")
   if(verbose){
     print(paste("proposal: movetype",movetype,
                 "swap:",paste(proposal$swap,collapse=","),
                 "mixswap:",paste(proposal$mixswap,collapse=",")))
   }
-  
-  #inf=infergraphpar(proposal$g,ctree_loss,data,control=control,...)
-  #proposal$inf=inf
   proposal$g
-}
-
-
-
-parameterise_<-function(g,pars,transform=TRUE,n=NA){
-  ## Take parameters and put them in their correct place in g
-  ## Optionally, treat these parameters as coming from R and transform them to their required ranges
-  ## If we provide enough pars to parameterise multiple graphs, we return a list of them, or optionally via n, a specific one
-  p=getp_(g)
-  np=npars_(g)
-  ng=length(pars)/np["tot"]
-  print(c(np, length(pars)))
-  if(floor(ng)!=ng) stop("Invalid parameterisation")
-  if(!is(g,"cglist")){
-    g=list(g)
-    class(g)="cglist"
-  }
-  ret=lapply(1:ng,function(i){
-    tg=g[[i]]
-    tpars=pars[(i-1)*np["tot"] + (1:np["tot"]) ]
-    if(transform) tpars=transformpars_(tg,tpars)
-    for(j in 1:np["nd"])  tg$nl[[ p$drift[j] ]]$d = tpars[j]
-    if(np["nm"]>0) for(j in 1:np["nm"]) tg$nl[[ tg$nl[[p$mix[j]]]$children[2] ]]$w = tpars[j+np["nd"]]
-    tg
-  })
-  for(i in 1:ng) if(length(g[[i]]$mixparmap)>0){
-    ii= g[[i]]$mixparmap
-    for(j in 1:np["nm"]) {
-      ret[[i]]$nl[[ ret[[i]]$nl[[p$mix[j]]]$children[2] ]]$w =
-        ret[[ii]]$nl[[ ret[[ii]]$nl[[p$mix[j]]]$children[2] ]]$w
-    }
-  }
-  if(length(ret)==1) {
-    if(is.na(n)) n=1
-    return(ret[[n]])
-  }
-  class(ret)="cglist"
-  return(ret)
 }
 
 
@@ -1059,13 +1037,67 @@ format_params <- function(g, pars){
   return(pars[rownames(pars) != mixedge , drop = FALSE])
 }
 
+parameterise_<-function(g, pars, what){
+  ## Take parameters and put them in their correct place in g
+  if(what == "d"){
+    nodes = c(g$tips, g$internal)
+    drift = nodes[nodes != g$root]
+  
+    tpars = format_params(g,pars)
 
+    for(j in 1:length(drift))  {
+      g$nl[[ drift[j] ]]$d = tpars[j]
+    }
+  }
+  
+  if(what == "w"){
+    weights = Map(c,pars,1-pars)
+    mix = g$mix
+    if(length(w) != length(mix)) stop("Error: invalid weight input")
+  
+    if(length(mix)>0) for(j in 1:length(mix)){
+      g$nl[[ g$nl[[mix[j]]]$children[2] ]]$w = weights[[j]]
+    }
+  }
+  return(g)
+}
+
+
+
+w_loss <- function(w,g0,data){
+  weights = Map(c,w,1-w)
+  mix = g0$mix
+  if(length(w) != length(mix)) stop("Error: invalid weight input")
+  
+  if(length(mix)>0) for(j in 1:length(mix)){
+    g0$nl[[ g0$nl[[mix[j]]]$children[2] ]]$w = weights[[j]]
+  }
+  p = get_depths(g0, data)
+  g = parameterise_(g0, p, what ="d")
+  loss = ctree_loss2_(g, data)
+  return(loss)
+}
+
+
+infer_weight <- function(g, data, method = "L-BFGS-B", control = defaultcontrol ){
+  w <- runif(length(g$mix),0.05,0.95)
+  opt=optim(par = w, fn = w_loss,
+            method=method,
+            lower = 0.05, upper = 0.95,
+            control=control,
+            g0 = g,
+            data=data)
+  return(opt$par)
+}
 
 
 infer_topo <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose = FALSE){
-  p = get_depths(g0, data)
-  g = parameterise_(g0,format_params(g0,p) , transform = F)
-  
+  w = infer_weight(g0, data) 
+  print(w)
+  g0 = parameterise_(g0, w, what = "w")
+  p = get_depths(g0, data) 
+  g = parameterise_(g0, p, what = "d")
+
   loss = ctree_loss2_(g,data)
   losses=rep(NA,maxiter)
   losses[1]=loss
@@ -1074,9 +1106,15 @@ infer_topo <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose
   
   if(maxiter>1) for(i in 2:maxiter){
     proposal0 = dagstep_(g, data, verbose = verbose)
-    p = get_depths(proposal0, data)
-    #
-    proposal = parameterise_(proposal0, format_params(proposal0,p), transform = F)
+    w = infer_weight(proposal0, data) 
+    proposal0 = parameterise_(proposal0, w, what = "w")
+    p = get_depths(proposal0, data) 
+    proposal = parameterise_(proposal0, p, what = "d")    
+    
+
+    
+    #p = get_depths(proposal0, data)
+    #proposal = parameterise_(proposal0, p)
     
     newloss = ctree_loss2_(proposal,data)
     
@@ -1093,7 +1131,7 @@ infer_topo <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose
       consecutive_loss_count = 0
     }
     
-    if (consecutive_loss_count >= patience) {
+    if (consecutive_loss_count >= patience && loss< losstol) {
       cat("Converged at iteration", i, "\n")
       break
     }
@@ -1101,5 +1139,116 @@ infer_topo <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose
   }
   print(loss)
   return(list(g,loss, losses))
+}
+
+
+infer_topo <- function(g0, data, maxiter = 100, losstol = 0.01, patience = 5, verbose = FALSE, initial_temperature = 1, cooling_factor = 0.99) {
+  w = infer_weight(g0, data)
+  print(w)
+  g0 = parameterise_(g0, w, what = "w")
+  p = get_depths(g0, data)
+  g = parameterise_(g0, p, what = "d")
+  
+  loss = ctree_loss2_(g, data)
+  losses = rep(NA, maxiter)
+  losses[1] = loss
+  
+  consecutive_loss_count = 0
+  temperature = initial_temperature
+  
+  if (maxiter > 1) {
+    for (i in 2:maxiter) {
+      proposal0 = dagstep_(g, data, verbose = verbose)
+      w = infer_weight(proposal0, data)
+      proposal0 = parameterise_(proposal0, w, what = "w")
+      p = get_depths(proposal0, data)
+      proposal = parameterise_(proposal0, p, what = "d")
+      
+      newloss = ctree_loss2_(proposal, data)
+      
+      if (newloss < loss || runif(1) < exp((loss - newloss) / temperature)) {
+        print(loss)
+        g = proposal
+        loss = newloss
+      }
+      
+      losses[i] = loss
+      
+      if (abs(losses[i] - losses[i - 1]) < losstol) {
+        consecutive_loss_count = consecutive_loss_count + 1
+      } else {
+        consecutive_loss_count = 0
+      }
+      
+      if (consecutive_loss_count >= patience && loss < losstol) {
+        cat("Converged at iteration", i, "\n")
+        break
+      }
+      
+      temperature = temperature * cooling_factor
+    }
+  }
+  
+  print(loss)
+  return(list(g, loss, losses))
+}
+
+infer_topo <- function(g0, data, maxiter = 100, losstol = 0.01, patience = 10, verbose = FALSE, initial_temperature = 0.5, cooling_factor = 1.5) {
+  w = infer_weight(g0, data)
+  print(w)
+  g0 = parameterise_(g0, w, what = "w")
+  p = get_depths(g0, data)
+  g = parameterise_(g0, p, what = "d")
+  
+  loss = ctree_loss2_(g, data)
+  best_loss = loss  # Initialize the best loss
+  
+  losses = rep(NA, maxiter)
+  losses[1] = loss
+  
+  consecutive_loss_count = 0
+  temperature = initial_temperature
+  
+  if (maxiter > 1) {
+    for (i in 2:maxiter) {
+      proposal0 = dagstep_(g, data, verbose = verbose)
+      w = infer_weight(proposal0, data)
+      proposal0 = parameterise_(proposal0, w, what = "w")
+      p = get_depths(proposal0, data)
+      proposal = parameterise_(proposal0, p, what = "d")
+      
+      newloss = ctree_loss2_(proposal, data)
+      
+      if (newloss < loss || runif(1) < exp((loss - newloss) / temperature)) {
+        print(loss)
+        g = proposal
+        loss = newloss
+        
+        # Update the best solution if a new best is found
+        if (newloss < best_loss) {
+          best_loss = newloss
+          best_solution = proposal
+        }
+      }
+      
+      losses[i] = loss
+      
+      if (abs(losses[i] - losses[i - 1]) < losstol) {
+        consecutive_loss_count = consecutive_loss_count + 1
+      } else {
+        consecutive_loss_count = 0
+      }
+      
+      if (consecutive_loss_count >= patience && loss < losstol) {
+        cat("Converged at iteration", i, "\n")
+        break
+      }
+      
+      temperature = temperature * cooling_factor
+    }
+  }
+  
+  print(best_loss)  # Print the best loss
+  return(list(best_solution, best_loss, losses))
 }
 
