@@ -4,9 +4,6 @@ library("Clarity")
 
 
 
-#### ERROR mypruneregraft - check parents updating correctly
-
-
 cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA,mixchild=NA){
   ## This is the generic function to create or update a node
   ## Pass an id to create a new node
@@ -570,8 +567,6 @@ get_weightmatrix = function(g) {
     for(k in 1:length(p[[i]])){
       for (l in 1:length(p[[i]])){
         overlap = p[[i]][[k]]$edge[ p[[i]][[k]]$edge %in% p[[i]][[l]]$edge] 
-        #print(overlap)
-        #print(dict[overlap])
         index = as.numeric(dict[overlap]) 
         rowvec[index] = as.numeric(rowvec[index]) + unique(p[[i]][[k]]$weight)*unique(p[[i]][[l]]$weight)
       }
@@ -1003,7 +998,6 @@ dagstep_ <- function(g,data,control=defaultcontrol,freqs=c(1/3,1/3,1/3),verbose=
 }
 
 
-
 parameterise_<-function(g,pars,transform=TRUE,n=NA){
   ## Take parameters and put them in their correct place in g
   ## Optionally, treat these parameters as coming from R and transform them to their required ranges
@@ -1011,7 +1005,6 @@ parameterise_<-function(g,pars,transform=TRUE,n=NA){
   p=getp_(g)
   np=npars_(g)
   ng=length(pars)/np["tot"]
-  print(c(np, length(pars)))
   if(floor(ng)!=ng) stop("Invalid parameterisation")
   if(!is(g,"cglist")){
     g=list(g)
@@ -1064,7 +1057,8 @@ format_params <- function(g, pars){
 
 infer_topo <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose = FALSE){
   p = get_depths(g0, data)
-  g = parameterise_(g0,format_params(g0,p) , transform = F)
+  #format_params(g0,p) 
+  g = parameterise_(g0, p)
   
   loss = ctree_loss2_(g,data)
   losses=rep(NA,maxiter)
@@ -1075,8 +1069,8 @@ infer_topo <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose
   if(maxiter>1) for(i in 2:maxiter){
     proposal0 = dagstep_(g, data, verbose = verbose)
     p = get_depths(proposal0, data)
-    #
-    proposal = parameterise_(proposal0, format_params(proposal0,p), transform = F)
+    #format_params(proposal0,p)
+    proposal = parameterise_(proposal0, p)
     
     newloss = ctree_loss2_(proposal,data)
     
