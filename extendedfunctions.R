@@ -35,8 +35,7 @@ cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA,mixch
 }
 
 simCoal_<-function(n,times="coal", alpha = 1, labels=paste0("t",1:n),outgroup=numeric()){
-  ## Simulate a coalescent tree in the "clarity graph" framework
-  ## Returns a "clarity graph" object
+  ## Simulate a coalescent tree 
   nodes = list()
   for(i in 1:n) nodes[[i]]=cnode_(i,t=0,d=0,w=1)
   alive = 1:n
@@ -252,6 +251,50 @@ ccov_tree_<-function(g){
 }
 
 
+
+assignheights <-function(g,rightalign=FALSE){
+  nleft=0
+  nnodes=length(g$nl)
+  i=g$root
+  node=g$root
+  for(i in 1:length(g$nl)) g$nl[[i]]$tmp=0 # tracks completed
+  
+  while(TRUE){
+    ## Situations:
+    ## 1. We have a left and need to go there
+    lefttodo = ((!is.na(g$nl[[node]]$children[1])) && (g$nl[[g$nl[[node]]$children[1]]]$tmp==0))
+    ## 2. We place ourself
+    selftodo = (g$nl[[node]]$tmp==0)
+    ## 3. Right to do
+    righttodo = ((!is.na(g$nl[[node]]$children[2])) &&
+                   (g$nl[[g$nl[[node]]$children[2]]]$tmp==0) &&
+                   (g$nl[[node]]$type!="mixture") )
+    ## 4. Return to parent if we have one
+    atroot = (g$root==node)
+    ## 5. Stop if -back- at root
+    if(lefttodo){
+      node=g$nl[[node]]$children[1]
+      next;
+    }else if(selftodo) {
+      g$nl[[node]]$tmp=1
+      g$nl[[node]]$p=nleft #/nnodes
+      if(is.na(g$nl[[node]]$parents[1])){ nleft=nleft + 1
+      }else if(g$nl[[ g$nl[[node]]$parents[1] ]]$type=="split") {  nleft=nleft + 1
+      }
+      next;
+    }else if(righttodo){
+      node=g$nl[[node]]$children[2]
+      next;            
+    }else if(!atroot){
+      node=g$nl[[node]]$parents[1]
+      next;
+    }else{
+      break;
+    }
+  }
+  g
+}
+
 assignlocation_ <- function(g,mindepth=0,maxdepth=Inf){
   ret=matrix(NA,nrow=length(g$nl),ncol=2)
   nnodes=length(g$nl)
@@ -301,6 +344,7 @@ assignlocation_ <- function(g,mindepth=0,maxdepth=Inf){
     #break}
     #}
   }
+  g = assignheights(g)
   g
 }
 
@@ -368,6 +412,14 @@ edges.cg_<-function(g){
   ))
 }
 
+locationasmatrix=function(g){
+  ## Location of each node 
+  tlayout=cbind(t=sapply(g$nl,function(x)x$t),
+                p=sapply(g$nl,function(x)x$p),
+                index=sapply(g$nl,function(x)x$id))
+  rownames(tlayout)=tlayout[,"index"]
+  tlayout
+}
 
 plot.cg_=function(g,ref=g,arrows.length=0.1,edges=NULL,
                   arrows.col=c("grey","red"),
@@ -542,33 +594,39 @@ ccov_dag_ = function(g, old=FALSE) {
 }
 
 
+
 get_weightmatrix = function(g) {
   edges = edges.cg_(g)
   p = list()
-  for(i in g$tips) {p[[i]] = paths(edges, i, g$root)}
+  for(i in g$tips) {p[[i]] = paths(edges, i, g$root)
+  }
   # make dictionary mapping edges to column numbers
   dict = list()
   l = 1
+  
   for(i in 1:length(g$nl)){
     node = g$nl[[i]]
     if(node$id == g$root) next
-    parents = node$parents
-    for(j in 1:length(parents)){
-      parent = parents[j]
-      edge =  paste0(node$id,"-",parent)
-      dict[as.character(edge)] = l
-      l = l + 1
-    }
+    parent = node$parents[1]
+    edge =  paste0(node$id,"-",parent)
+    dict[as.character(edge)] = l
+    l = l + 1
   }
   W = NULL
   for(i in g$tips){
     rowvec = NULL
-    for(j in 1:(length(g$nl)-1 + length(g$mix))) rowvec[j] = 0
+    for(j in 1:(length(g$nl) - 1 )) rowvec[j] = 0
     for(k in 1:length(p[[i]])){
       for (l in 1:length(p[[i]])){
-        overlap = p[[i]][[k]]$edge[ p[[i]][[k]]$edge %in% p[[i]][[l]]$edge] 
+        p1 = p[[i]][[k]] 
+        p2 = p[[i]][[l]]
+        # remove mix edges since they have drift 0
+        p1 = p1[p1$mix !=1,] 
+        p2 = p2[p2$mix !=1,] 
+        
+        overlap = p1$edge[ p1$edge %in% p2$edge] 
         index = as.numeric(dict[overlap]) 
-        rowvec[index] = as.numeric(rowvec[index]) + unique(p[[i]][[k]]$weight)*unique(p[[i]][[l]]$weight)
+        rowvec[index] = as.numeric(rowvec[index]) + unique(p1$weight)*unique(p2$weight)
       }
     }
     W = rbind(W,unlist(rowvec))
@@ -583,6 +641,7 @@ get_depths = function(g, V){
   #V = ccov_dag_(g)
   W = get_weightmatrix(g)
   sol = t(W)%*%solve(W%*%t(W))%*%diag(V)
+  sol[sol < 0] = 0
   return(sol)
 }
 
@@ -800,26 +859,6 @@ mypruneregraftstep_<-function(g){
   }
   print(swap)
   list(g=gtest,swap=swap,mixswap=NA)
-}
-
-
-infergraphpar_<-function(g,ctree_loss,
-                        data,
-                        lower=-5,
-                        method="L-BFGS-B",
-                        control=defaultcontrol,
-                        ...){
-  ## Infer a graph's best parameters
-  p= gparvec(g,invtrans=TRUE)
-  
-  lower=rep(lower,length(p))
-  opt=optim(p,ctree_loss,
-            gref=g,
-            method=method,
-            dataref=data,lower=lower,
-            control=control,...)
-  g=parameterise(g,opt$par)
-  list(g=g,par=opt$par,loss=opt$value)
 }
 
 
@@ -1043,17 +1082,17 @@ parameterise_<-function(g, pars, what){
     nodes = c(g$tips, g$internal)
     drift = nodes[nodes != g$root]
   
-    tpars = format_params(g,pars)
+    #tpars = format_params(g,pars)
 
     for(j in 1:length(drift))  {
-      g$nl[[ drift[j] ]]$d = tpars[j]
+      g$nl[[ drift[j] ]]$d = pars[j] #tpars[j]
     }
   }
   
   if(what == "w"){
     weights = Map(c,pars,1-pars)
     mix = g$mix
-    if(length(w) != length(mix)) stop("Error: invalid weight input")
+    if(length(pars) != length(mix)) stop("Error: invalid weight input")
   
     if(length(mix)>0) for(j in 1:length(mix)){
       g$nl[[ g$nl[[mix[j]]]$children[2] ]]$w = weights[[j]]
@@ -1061,7 +1100,6 @@ parameterise_<-function(g, pars, what){
   }
   return(g)
 }
-
 
 
 w_loss <- function(w,g0,data){
@@ -1072,155 +1110,159 @@ w_loss <- function(w,g0,data){
   if(length(mix)>0) for(j in 1:length(mix)){
     g0$nl[[ g0$nl[[mix[j]]]$children[2] ]]$w = weights[[j]]
   }
+  
   p = get_depths(g0, data)
-  g = parameterise_(g0, p, what ="d")
+  
+  g = parameterise_(g0, pars=p, what ="d")
+  
   loss = ctree_loss2_(g, data)
   return(loss)
 }
 
 
-infer_weight <- function(g, data, method = "L-BFGS-B", control = defaultcontrol ){
+infer_weight <- function(g, data){
   w <- runif(length(g$mix),0.05,0.95)
-  opt=optim(par = w, fn = w_loss,
-            method=method,
-            lower = 0.05, upper = 0.95,
-            control=control,
-            g0 = g,
-            data=data)
-  return(opt$par)
+  opt=optimize(f = function(w) w_loss(w, g, data),
+               maximum = FALSE, tol = 0.1,
+               interval = c(0.05, 0.95))
+  return(opt$minimum)
 }
 
 
-infer_topo <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose = FALSE){
-  w = infer_weight(g0, data) 
-  print(w)
-  g0 = parameterise_(g0, w, what = "w")
-  p = get_depths(g0, data) 
-  g = parameterise_(g0, p, what = "d")
-
-  loss = ctree_loss2_(g,data)
-  losses=rep(NA,maxiter)
-  losses[1]=loss
-  
-  consecutive_loss_count = 0
-  
-  if(maxiter>1) for(i in 2:maxiter){
-    proposal0 = dagstep_(g, data, verbose = verbose)
-    w = infer_weight(proposal0, data) 
-    proposal0 = parameterise_(proposal0, w, what = "w")
-    p = get_depths(proposal0, data) 
-    proposal = parameterise_(proposal0, p, what = "d")    
-    
-
-    
-    #p = get_depths(proposal0, data)
-    #proposal = parameterise_(proposal0, p)
-    
-    newloss = ctree_loss2_(proposal,data)
-    
-    if (newloss < loss){
-      print(loss)
-      g = proposal
-      loss = newloss
-    }
-    losses[i]=loss
-    
-    if (abs(losses[i] - losses[i - 1]) < losstol) {
-      consecutive_loss_count = consecutive_loss_count + 1
-    } else {
-      consecutive_loss_count = 0
-    }
-    
-    if (consecutive_loss_count >= patience && loss< losstol) {
-      cat("Converged at iteration", i, "\n")
-      break
-    }
-    
-  }
-  print(loss)
-  return(list(g,loss, losses))
+infer_graph_hc <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose = FALSE){
+   w = infer_weight(g0, data) 
+   g0 = parameterise_(g0, pars=w, what = "w")
+   p = get_depths(g0, data) 
+   g = parameterise_(g0, pars=p, what = "d")
+ 
+   loss = ctree_loss2_(g,data)
+   losses=rep(NA,maxiter)
+   losses[1]=loss
+   best_loss = loss  # Initialise best loss
+   best_solution = g # Initialise best solution
+   
+   consecutive_loss_count = 0
+   
+   if(maxiter>1) for(i in 2:maxiter){
+     proposal0 = dagstep_(g, data, verbose = verbose)
+     w = infer_weight(proposal0, data) 
+     proposal0 = parameterise_(proposal0, pars=w, what = "w")
+     p = get_depths(proposal0, data) 
+     proposal = parameterise_(proposal0, pars=p, what = "d")    
+     
+     newloss = ctree_loss2_(proposal,data)
+     
+     if (newloss < loss){
+       print("new g")
+       g = proposal
+       loss = newloss
+       
+       # Update the best solution if a new best is found
+       if (newloss < best_loss) {
+         best_loss = newloss
+         best_solution = proposal
+       }
+     }
+     losses[i]=loss
+     
+     if (abs(losses[i] - losses[i - 1]) < losstol) {
+       consecutive_loss_count = consecutive_loss_count + 1
+     } else {
+       consecutive_loss_count = 0
+     }
+     
+     if (consecutive_loss_count >= patience & loss< losstol) {
+       cat("Converged at iteration", i, "\n")
+       break
+     }
+     
+   }
+   print(best_loss)  # Print the best loss
+   return(list(best_solution, best_loss, losses))
 }
 
 
-infer_topo <- function(g0, data, maxiter = 100, losstol = 0.01, patience = 5, verbose = FALSE, initial_temperature = 1, cooling_factor = 0.99) {
+
+# infer_graph <- function(g0, data, maxiter = 100, losstol = 0.01, patience = 5, verbose = FALSE, initial_temperature = 1, cooling_factor = 0.99) {
+#   w = infer_weight(g0, data)
+#   print(c(w,w,w))
+#   g0 = parameterise_(g0, pars=w, what = "w")
+#   p = get_depths(g0, data)
+#   g = parameterise_(g0, pars=p, what = "d")
+#   
+#   loss = ctree_loss2_(g, data)
+#   losses = rep(NA, maxiter)
+#   losses[1] = loss
+#   
+#   consecutive_loss_count = 0
+#   temperature = initial_temperature
+#   
+#   if (maxiter > 1) {
+#     for (i in 2:maxiter) {
+#       proposal0 = dagstep_(g, data, verbose = verbose)
+#       w = infer_weight(proposal0, data)
+#       proposal0 = parameterise_(proposal0, pars=w, what = "w")
+#       p = get_depths(proposal0, data)
+#       proposal = parameterise_(proposal0, pars=p, what = "d")
+#       
+#       newloss = ctree_loss2_(proposal, data)
+#       
+#       if (newloss < loss || runif(1) < exp((loss - newloss) / temperature)) {
+#         print(loss)
+#         g = proposal
+#         loss = newloss
+#       }
+#       
+#       losses[i] = loss
+#       
+#       if (abs(losses[i] - losses[i - 1]) < losstol) {
+#         consecutive_loss_count = consecutive_loss_count + 1
+#       } else {
+#         consecutive_loss_count = 0
+#       }
+#       
+#       if (consecutive_loss_count >= patience && loss < losstol) {
+#         cat("Converged at iteration", i, "\n")
+#         break
+#       }
+#       
+#       temperature = temperature * cooling_factor
+#     }
+#   }
+#   
+#   print(loss)
+#   return(list(g, loss, losses))
+# }
+
+
+
+
+infer_graph <- function(g0, data, maxiter = 100, losstol = 0.01, verbose = FALSE, initial_temperature = 0.5, cooling_factor = 1.5) {
   w = infer_weight(g0, data)
-  print(w)
-  g0 = parameterise_(g0, w, what = "w")
+  g0 = parameterise_(g0, pars=w, what = "w")
   p = get_depths(g0, data)
-  g = parameterise_(g0, p, what = "d")
+  g = parameterise_(g0, pars=p, what = "d")
   
   loss = ctree_loss2_(g, data)
+  best_loss = loss  # Initialise best loss
+  best_solution = g # Initialise best solution
   losses = rep(NA, maxiter)
   losses[1] = loss
   
-  consecutive_loss_count = 0
   temperature = initial_temperature
   
   if (maxiter > 1) {
     for (i in 2:maxiter) {
       proposal0 = dagstep_(g, data, verbose = verbose)
       w = infer_weight(proposal0, data)
-      proposal0 = parameterise_(proposal0, w, what = "w")
+      proposal0 = parameterise_(proposal0, pars=w, what = "w")
       p = get_depths(proposal0, data)
-      proposal = parameterise_(proposal0, p, what = "d")
+      proposal = parameterise_(proposal0, pars=p, what = "d")
       
       newloss = ctree_loss2_(proposal, data)
-      
-      if (newloss < loss || runif(1) < exp((loss - newloss) / temperature)) {
-        print(loss)
-        g = proposal
-        loss = newloss
-      }
-      
-      losses[i] = loss
-      
-      if (abs(losses[i] - losses[i - 1]) < losstol) {
-        consecutive_loss_count = consecutive_loss_count + 1
-      } else {
-        consecutive_loss_count = 0
-      }
-      
-      if (consecutive_loss_count >= patience && loss < losstol) {
-        cat("Converged at iteration", i, "\n")
-        break
-      }
-      
-      temperature = temperature * cooling_factor
-    }
-  }
-  
-  print(loss)
-  return(list(g, loss, losses))
-}
-
-infer_topo <- function(g0, data, maxiter = 100, losstol = 0.01, patience = 10, verbose = FALSE, initial_temperature = 0.5, cooling_factor = 1.5) {
-  w = infer_weight(g0, data)
-  print(w)
-  g0 = parameterise_(g0, w, what = "w")
-  p = get_depths(g0, data)
-  g = parameterise_(g0, p, what = "d")
-  
-  loss = ctree_loss2_(g, data)
-  best_loss = loss  # Initialize the best loss
-  
-  losses = rep(NA, maxiter)
-  losses[1] = loss
-  
-  consecutive_loss_count = 0
-  temperature = initial_temperature
-  
-  if (maxiter > 1) {
-    for (i in 2:maxiter) {
-      proposal0 = dagstep_(g, data, verbose = verbose)
-      w = infer_weight(proposal0, data)
-      proposal0 = parameterise_(proposal0, w, what = "w")
-      p = get_depths(proposal0, data)
-      proposal = parameterise_(proposal0, p, what = "d")
-      
-      newloss = ctree_loss2_(proposal, data)
-      
-      if (newloss < loss || runif(1) < exp((loss - newloss) / temperature)) {
-        print(loss)
+     # print(exp((loss - newloss) / temperature))
+      if((newloss < loss ) || runif(n=1, min=0, max = 0.99) < exp((loss - newloss) / temperature)) {
+        print(c("Current loss:", newloss))
         g = proposal
         loss = newloss
         
@@ -1233,13 +1275,7 @@ infer_topo <- function(g0, data, maxiter = 100, losstol = 0.01, patience = 10, v
       
       losses[i] = loss
       
-      if (abs(losses[i] - losses[i - 1]) < losstol) {
-        consecutive_loss_count = consecutive_loss_count + 1
-      } else {
-        consecutive_loss_count = 0
-      }
-      
-      if (consecutive_loss_count >= patience && loss < losstol) {
+      if (loss < losstol) {
         cat("Converged at iteration", i, "\n")
         break
       }
@@ -1249,6 +1285,6 @@ infer_topo <- function(g0, data, maxiter = 100, losstol = 0.01, patience = 10, v
   }
   
   print(best_loss)  # Print the best loss
-  return(list(best_solution, best_loss, losses))
+  return(list(g = best_solution, loss = best_loss, losslist = losses))
 }
 
