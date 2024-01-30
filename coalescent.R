@@ -1,6 +1,6 @@
 
 setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project")
-source("mixfunctions.R")
+#source("mixfunctions.R")
 library("Clarity")
 source("extendedfunctions.R")
 
@@ -42,9 +42,9 @@ plot.cg_(trand0, main="Alternative graph",showedges = T )
 plot.cg_(trand1,main="Alternative mixture graph", showedges = T)
 
 ## Perform inference
-tinf1=infer_graph(trand1, data, maxiter = 50 ,verbose = T, losstol = 0.001, initial_temperature = 0.5, cooling_factor = 1.5) 
+tinf1=infer_graph_hc(trand1, data, maxiter = 100 ,verbose = T, losstol = 0.001)
 
-tinf1=infer_graph(tinf1[[1]], data, maxiter = 100 ,verbose = T, losstol = 0.001, initial_temperature = 0.01, cooling_factor = 1) 
+#tinf1=infer_graph(tinf1[[1]], data, maxiter = 100 ,verbose = T, losstol = 0.001)
 
 plot.cg_(tg1,main="Data graph", showedges = T)
 plot.cg_(tinf1[[1]], main="Predicted graph")
@@ -69,7 +69,7 @@ Clarity_Chart(ordermatrix(tinfpred1,pt$order),scalefun=myscalefun2,text=T)
 ##################################
 
 ## Simulate a 4 population model where there is an outgroup
-tg0=simCoal_(5,labels=c("A","B","C","D", "O"), alpha = 1,outgroup="O")
+tg0=simCoal_(9,labels=c("A","B","C","D","E","F","G","H","O"), alpha = 1,outgroup="O")
 ## Add to this graph a "mixture edge" from node 1 to node 3
 tg1=mixedge_(tg0, 1, 3, 0.5, 0.2)
 #tg2=mixedge_(tg1,4,3,0.5,0.8) ## Seconldly with weight 0.8
@@ -82,17 +82,24 @@ plot.cg_(tg1,main="Mixture graph", showedges = T)
 # simulate data
 data=ccov_dag_(tg1)
 
-## Make a random pair of alternative graphs
-trand0=simCoal_(5,labels=c("A","B","C","D","O"),outgroup="O")
-trand1=mixedge_(trand0,2,3,0.5,0.5)  ## Careful not to involve the outgroup
-
-plot.cg_(trand0, main="Alternative graph",showedges = T )
-plot.cg_(trand1,main="Alternative mixture graph", showedges = T)
+# Make a random proposal graph
+trand0=simCoal_(9,labels=c("A","B","C","D","E","F","G","H","O"),outgroup="O")
+trand1 = mixedge_(trand0,2,3,0.5,0.5)
+plot.cg_(trand0, main="Proposal graph",showedges = T )
+plot.cg_(trand1, main="Proposal graph 2",showedges = T )
 
 ## Perform inference
-#tinf1=infer_graph_hc(trand1, data, maxiter = 100 ,verbose = T, losstol = 0.001, patience = 1) 
 
-tinf1=infer_graph(tinf1$g, data, maxiter = 50 ,verbose = T, losstol = 0.001, initial_temperature = 0.25, cooling_factor = 1) 
+tinf1=infer_graph(trand0, data, maxiter = 200 ,verbose = T, losstol = 0.01, transform = T) 
+
+plot.cg_(tinf1$g, main = "Inferred graph", showedges = T)
+plot.cg_(tg1, main="Original graph",showedges = T )
+
+tinf2=infer_graph_hc(trand1, data, maxiter = 50 ,verbose = T, losstol = 0.01) 
+
+plot.cg_(tinf2$g, main = "Predicted graph", showedges = T)
+plot.cg_(tg1,main="Data graph", showedges = T)
+
 
 plot.cg_(tg1,main="Data graph", showedges = T)
 plot.cg_(tinf1[[1]], main="Predicted graph")
@@ -113,7 +120,39 @@ Clarity_Chart(ordermatrix(tpred1,pt$order),scalefun=myscalefun2,text=T )
 Clarity_Chart(ordermatrix(tinfpred1,pt$order),scalefun=myscalefun2,text=T)
 
 
+################################################################################
 
+## Simulate a 4 population model where there is an outgroup
+tg0=simCoal_(5,labels=c("A","B","C","D", "O"), alpha = 1,outgroup="O")
+## Add to this graph a "mixture edge" from node 1 to node 3
+tg1=mixedge_(tg0, 1, 3, 0.5, 0.2)
+#tg2=mixedge_(tg1,4,3,0.5,0.8) ## Seconldly with weight 0.8
+
+par(mfrow=c(1,2))
+plot.cg_(tg0, main="Original graph",showedges = T )
+plot.cg_(tg1,main="Mixture graph", showedges = T)
+
+# simulate data
+data=ccov_dag_(tg1)
+
+
+
+## Make a random pair of alternative graphs
+trand0=simCoal_(4,labels=c("A","B","C","O"),outgroup="O")
+
+plot.cg_(trand0, main="Alternative graph",showedges = T )
+
+df1 = data[c(1:3,5),c(1:3,5)]
+
+## Perform inference
+tinf1 = infer_graph(trand0, df1, maxiter = 100 ,verbose = T, losstol = 0.001)
+
+plot.cg_(tinf1[[1]], main="Predicted graph")
+
+tinf2 = add_pop(tinf1[[1]], randomnodes(tinf1[[1]], n=1), label = "D")
+plot.cg_(tinf2)
+
+tinf2 = infer_graph_hc(trand1[[1]] , data, maxiter = 50 ,verbose = T, losstol = 0.001)
 
 
 ################################################################################
@@ -214,41 +253,3 @@ printTmp <- function(g){
 
 ########################################
 
-# 
-
-get_weightmatrix = function(g) {
-  edges = edges.cg_(g)
-  p = list()
-  for(i in g$tips) {p[[i]] = paths(edges, i, g$root)}
-  # make dictionary mapping edges to column numbers
-  dict = list()
-  l = 1
-  mixnodes = g$mix
-  for(i in 1:length(g$nl)){
-    node = g$nl[[i]]
-    # if(i %in% mixnodes)
-    if(node$id == g$root) next
-    parents = node$parents
-    for(j in 1:length(parents)){
-      parent = parents[j]
-      edge =  paste0(node$id,"-",parent)
-      dict[as.character(edge)] = l
-      l = l + 1
-    }
-  }
-  W = NULL
-  for(i in g$tips){
-    rowvec = NULL
-    for(j in 1:(length(g$nl)-1 + length(g$mix))) rowvec[j] = 0
-    for(k in 1:length(p[[i]])){
-      for (l in 1:length(p[[i]])){
-        overlap = p[[i]][[k]]$edge[ p[[i]][[k]]$edge %in% p[[i]][[l]]$edge] 
-        index = as.numeric(dict[overlap]) 
-        rowvec[index] = as.numeric(rowvec[index]) + unique(p[[i]][[k]]$weight)*unique(p[[i]][[l]]$weight)
-      }
-    }
-    W = rbind(W,unlist(rowvec))
-  }
-  colnames(W) = sort(names(dict))
-  return(W)
-}

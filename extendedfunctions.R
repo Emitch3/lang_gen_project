@@ -595,7 +595,7 @@ ccov_dag_ = function(g, old=FALSE) {
 
 
 
-get_weightmatrix = function(g) {
+get_weightmatrix_old = function(g) {
   edges = edges.cg_(g)
   p = list()
   for(i in g$tips) {p[[i]] = paths(edges, i, g$root)
@@ -636,14 +636,80 @@ get_weightmatrix = function(g) {
 }
 
 
-get_depths = function(g, V){
+get_weightmatrix = function(g) {
+  edges = edges.cg_(g)
+  p = list()
+  for(i in g$tips) {p[[i]] = paths(edges, i, g$root)
+  }
+  # make dictionary mapping edges to column numbers
+  dict = list()
+  l = 1
+  
+  for(i in 1:length(g$nl)){
+    node = g$nl[[i]]
+    if(node$id == g$root) next
+    parent = node$parents[1]
+    edge =  paste0(node$id,"-",parent)
+    dict[as.character(edge)] = l
+    l = l + 1
+  }
+  W = NULL
+  for(i in g$tips){
+    for(j in g$tips){
+      if(i<j) next # skip duplicates ie. cov(A,B) = cov(B,A)
+      rowvec = NULL
+      for(m in 1:(length(g$nl) - 1 )) rowvec[m] = 0
+      for(k in 1:length(p[[i]])){
+        for (l in 1:length(p[[j]])){
+          p1 = p[[i]][[k]] 
+          p2 = p[[j]][[l]]
+          # remove mix edges since they have drift 0
+          p1 = p1[p1$mix !=1,] 
+          p2 = p2[p2$mix !=1,] 
+          
+          overlap = p1$edge[ p1$edge %in% p2$edge] 
+          index = as.numeric(dict[overlap]) 
+          rowvec[index] = as.numeric(rowvec[index]) + unique(p1$weight)*unique(p2$weight)
+        }
+      }
+      W = rbind(W,unlist(rowvec))
+    }
+  }
+  colnames(W) = sort(names(dict))
+  return(W)
+}
+
+# p = number of edges
+# n = number of entries in covariance matrix
+# V = covariance data matrix - 
+
+upper_tri <- data
+upper_tri[lower.tri(data)] <- 0
+upper_tri
+
+data[upper.tri(data, diag = T)]
+
+get_depths = function(g, V, trans){
   #input topology g and covariance matrix and output depths
   #V = ccov_dag_(g)
-  W = get_weightmatrix(g)
-  sol = t(W)%*%solve(W%*%t(W))%*%diag(V)
+  W = get_weightmatrix(tg0)
+  #sol = t(W)%*%solve(W%*%t(W))%*%diag(V)
+  #Y = diag(diag(data))/data[ncol(data),ncol(data)]
+  tri_V = V[upper.tri(V, diag = T)]
+  
+  
+  
+ # sol = t(W)%*%solve(W%*%t(W))%*%tri_V #solve(Y)%*%diag(V)
+  if(det(t(W)%*%W) == 0) stop(return(g))
+  sol = solve(t(W)%*%W)%*%t(W)%*%(trans*tri_V)
   sol[sol < 0] = 0
   return(sol)
 }
+
+
+
+#install.packages("nnls")
+#library(nnls)
 
 
 mypruneregraft_ = function(g,source,target,careful=FALSE){
@@ -773,11 +839,20 @@ isvalidregraftpair_<-function(g,swap){
   ## nodes share a parent
   if((!is.na(g$nl[[swap[1]]]$parents[1]))&&(!is.na(g$nl[[swap[2]]]$parents[1]))) if(g$nl[[swap[1]]]$parents[1]==g$nl[[swap[2]]]$parents[1]) done=FALSE
   ## The target is the parent of the source
-  if((!is.na(g$nl[[swap[1]]]$parents[1])) && (g$nl[[swap[1]]]$parents[1]==swap[2])) done=FALSE
+  if((!is.na(g$nl[[swap[1]]]$parents[1])) && (g$nl[[swap[1]]]$parents[1]==swap[2])) {
+    #print("The target is the parent of the source")
+    done=FALSE
+    }
   ## The target is a descendent of the source
-  if(swap[2] %in% nodesunder_(g,swap[[1]])) done=FALSE
+  if(swap[2] %in% nodesunder_(g,swap[[1]])) {
+    #print("The target is a descendent of the source")
+    done=FALSE    
+  }
   ## The source is a descendent of the target
-  if(swap[1] %in% nodesunder_(g,swap[[2]])) done=FALSE
+  if(swap[1] %in% nodesunder_(g,swap[[2]])) {
+    #print("The source is a descendent of the target")
+    done=FALSE
+    }
   ## Either is an outgroup
   if(length(g$outgroup)>0){
     tog=which(g$tip.label==g$outgroup)
@@ -817,6 +892,21 @@ gparvec_<-function(g,invtrans=FALSE){
   if(np["nm"]>0) for(i in 1:np["nm"])  pars[i+np["nd"]] = g$nl[[ g$nl[[p$mix[i]]]$cr ]]$w
   if(invtrans) pars=transformpars(g,pars,T)
   pars
+}
+
+
+randomnodes<-function(g,n=2,root=FALSE,mix=FALSE,tips=TRUE,internal=TRUE, outgroup = FALSE){
+  ## Return n random nodes of g satisfying the criterion
+  tog = which(g$tip.label==g$outgroup)
+  valid=numeric()
+  if(tips) valid=c(valid,g$tips)
+  if(internal) valid=c(valid,g$internal)
+  if(mix) valid=c(valid,g$mix)
+  if(!root) valid=valid[!(valid%in%g$root)]
+  if(!outgroup) valid=valid[!(valid%in%tog)]
+  if(length(valid)<n) stop(paste("Error: requested",n,"nodes but only",length(valid),"meet the criterion!"))
+  if(length(valid)==n) return(valid) # sample behaves badly if length(valid)==1
+  sample(valid,n)
 }
 
 
@@ -985,6 +1075,7 @@ isvalidregraftmixture_<-function(g,rem,ret){
 }
 
 
+
 randomregraftmixture_<-function(g,add=FALSE,maxtries=200,...){
   ntries=0
   done=FALSE
@@ -1030,7 +1121,7 @@ reversemixture_<-function(g){
   list(g=g,swap=NA,mixswap=NA)
 }
 
- 
+
 
 dagstep_ <- function(g,data,control=defaultcontrol,freqs=c(1/4,1/4,1/4,1/4),verbose=FALSE,...){
   ## Do one iteration of the graph
@@ -1111,8 +1202,8 @@ w_loss <- function(w,g0,data){
     g0$nl[[ g0$nl[[mix[j]]]$children[2] ]]$w = weights[[j]]
   }
   
-  p = get_depths(g0, data)
-  
+  p = get_depths(g0, data, trans)
+
   g = parameterise_(g0, pars=p, what ="d")
   
   loss = ctree_loss2_(g, data)
@@ -1129,99 +1220,98 @@ infer_weight <- function(g, data){
 }
 
 
-infer_graph_hc <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, verbose = FALSE){
+infer_graph <- function(g0, data,maxiter=100,losstol=0.01, verbose = FALSE, transform = FALSE){
+  
+  if(transform){
+    # least-squares transformation vector
+    Y = diag(diag(data))/data[ncol(data),ncol(data)] 
+    inv_Y = solve(Y)
+    trans = inv_Y[upper.tri(inv_Y, diag = T)]
+    trans[trans == 0] = 1
+  } else trans = 1
+  
+  if(length(g0$mix)>0){
    w = infer_weight(g0, data) 
    g0 = parameterise_(g0, pars=w, what = "w")
-   p = get_depths(g0, data) 
-   g = parameterise_(g0, pars=p, what = "d")
- 
-   loss = ctree_loss2_(g,data)
-   losses=rep(NA,maxiter)
-   losses[1]=loss
-   best_loss = loss  # Initialise best loss
-   best_solution = g # Initialise best solution
+  }
+  p = get_depths(g0, data, trans ) 
+  g = parameterise_(g0, pars=p, what = "d")
+  
+  loss = ctree_loss2_(g,data)
+  losses=rep(NA,maxiter)
+  losses[1]=loss
+  
+  if(maxiter>1) for(i in 2:maxiter){
    
-   consecutive_loss_count = 0
+   proposal0 = dagstep_(g, data, verbose = verbose)
    
-   if(maxiter>1) for(i in 2:maxiter){
-     proposal0 = dagstep_(g, data, verbose = verbose)
+   if(length(g0$mix)>0){
      w = infer_weight(proposal0, data) 
      proposal0 = parameterise_(proposal0, pars=w, what = "w")
-     p = get_depths(proposal0, data) 
-     proposal = parameterise_(proposal0, pars=p, what = "d")    
-     
-     newloss = ctree_loss2_(proposal,data)
-     
-     if (newloss < loss){
-       print("new g")
-       g = proposal
-       loss = newloss
-       
-       # Update the best solution if a new best is found
-       if (newloss < best_loss) {
-         best_loss = newloss
-         best_solution = proposal
-       }
-     }
-     losses[i]=loss
-     
-     if (abs(losses[i] - losses[i - 1]) < losstol) {
-       consecutive_loss_count = consecutive_loss_count + 1
-     } else {
-       consecutive_loss_count = 0
-     }
-     
-     if (consecutive_loss_count >= patience & loss< losstol) {
-       cat("Converged at iteration", i, "\n")
-       break
-     }
-     
    }
-   print(best_loss)  # Print the best loss
-   return(list(best_solution, best_loss, losses))
+   p = get_depths(proposal0, data, trans) 
+   proposal = parameterise_(proposal0, pars=p, what = "d")    
+  
+   newloss = ctree_loss2_(proposal,data)
+   
+   if (newloss < loss){
+     print(c("Current loss:", newloss))
+     g = proposal
+     loss = newloss
+   }
+   losses[i]=loss
+   if(loss<losstol) break
+  }
+  print(loss)  
+  return(list(g = g, loss = loss, loss_list = losses))
 }
 
 
 
-# infer_graph <- function(g0, data, maxiter = 100, losstol = 0.01, patience = 5, verbose = FALSE, initial_temperature = 1, cooling_factor = 0.99) {
-#   w = infer_weight(g0, data)
-#   print(c(w,w,w))
-#   g0 = parameterise_(g0, pars=w, what = "w")
+
+# infer_graph <- function(g0, data, maxiter = 100, losstol = 0.01, verbose = FALSE, initial_temperature = 0.5, cooling_factor = 1.5) {
+#   if(length(g0$mix)>0){
+#     w = infer_weight(g0, data)
+#     g0 = parameterise_(g0, pars=w, what = "w")
+#   }
 #   p = get_depths(g0, data)
 #   g = parameterise_(g0, pars=p, what = "d")
 #   
 #   loss = ctree_loss2_(g, data)
+#   best_loss = loss  # Initialise best loss
+#   best_solution = g # Initialise best solution
 #   losses = rep(NA, maxiter)
 #   losses[1] = loss
 #   
-#   consecutive_loss_count = 0
 #   temperature = initial_temperature
 #   
 #   if (maxiter > 1) {
 #     for (i in 2:maxiter) {
 #       proposal0 = dagstep_(g, data, verbose = verbose)
-#       w = infer_weight(proposal0, data)
-#       proposal0 = parameterise_(proposal0, pars=w, what = "w")
+#       if(length(g0$mix)>0){
+#         w = infer_weight(proposal0, data)
+#         proposal0 = parameterise_(proposal0, pars=w, what = "w")
+#       }
 #       p = get_depths(proposal0, data)
 #       proposal = parameterise_(proposal0, pars=p, what = "d")
 #       
 #       newloss = ctree_loss2_(proposal, data)
-#       
-#       if (newloss < loss || runif(1) < exp((loss - newloss) / temperature)) {
-#         print(loss)
+#      # print(exp((loss - newloss) / temperature))
+#       if((newloss < loss ) || runif(n=1, min=0, max = 0.99) < exp((loss - newloss) / temperature)) {
+#         print(c("Current loss:", newloss))
 #         g = proposal
 #         loss = newloss
+#         
+#         # Update the best solution if a new best is found
+#         if (newloss < best_loss) {
+#           best_loss = newloss
+#           best_solution = proposal
+#         }
 #       }
 #       
 #       losses[i] = loss
 #       
-#       if (abs(losses[i] - losses[i - 1]) < losstol) {
-#         consecutive_loss_count = consecutive_loss_count + 1
-#       } else {
-#         consecutive_loss_count = 0
-#       }
-#       
-#       if (consecutive_loss_count >= patience && loss < losstol) {
+#       if (loss < losstol) {
 #         cat("Converged at iteration", i, "\n")
 #         break
 #       }
@@ -1230,61 +1320,95 @@ infer_graph_hc <- function(g0, data,maxiter=100,losstol=0.01, patience = 10, ver
 #     }
 #   }
 #   
-#   print(loss)
-#   return(list(g, loss, losses))
+#   print(best_loss)  # Print the best loss
+#   return(list(g = best_solution, loss = best_loss, losslist = losses))
 # }
 
 
+#######################
 
 
-infer_graph <- function(g0, data, maxiter = 100, losstol = 0.01, verbose = FALSE, initial_temperature = 0.5, cooling_factor = 1.5) {
-  w = infer_weight(g0, data)
-  g0 = parameterise_(g0, pars=w, what = "w")
-  p = get_depths(g0, data)
-  g = parameterise_(g0, pars=p, what = "d")
+## ADD NEAREST NEIGHBOURS INTERCHANGE ##
+
+
+nn_interchange <- function(g){
   
-  loss = ctree_loss2_(g, data)
-  best_loss = loss  # Initialise best loss
-  best_solution = g # Initialise best solution
-  losses = rep(NA, maxiter)
-  losses[1] = loss
   
-  temperature = initial_temperature
   
-  if (maxiter > 1) {
-    for (i in 2:maxiter) {
-      proposal0 = dagstep_(g, data, verbose = verbose)
-      w = infer_weight(proposal0, data)
-      proposal0 = parameterise_(proposal0, pars=w, what = "w")
-      p = get_depths(proposal0, data)
-      proposal = parameterise_(proposal0, pars=p, what = "d")
-      
-      newloss = ctree_loss2_(proposal, data)
-     # print(exp((loss - newloss) / temperature))
-      if((newloss < loss ) || runif(n=1, min=0, max = 0.99) < exp((loss - newloss) / temperature)) {
-        print(c("Current loss:", newloss))
-        g = proposal
-        loss = newloss
-        
-        # Update the best solution if a new best is found
-        if (newloss < best_loss) {
-          best_loss = newloss
-          best_solution = proposal
-        }
-      }
-      
-      losses[i] = loss
-      
-      if (loss < losstol) {
-        cat("Converged at iteration", i, "\n")
-        break
-      }
-      
-      temperature = temperature * cooling_factor
-    }
+}
+
+
+
+
+
+
+
+
+
+
+add_pop<- function(g, target, label){
+  ## UNFINISHED ##
+  if(target == g$root){ 
+    print("Error: Target cannot be the root")
+    return(g)}
+  
+  nnodes = length(g$nl)
+  for(i in 1:2) g$nl[[nnodes + i]] = cnode_(length(g$nl) + i,t=0,d=0,w=1, type = "split") # create two new nodes
+
+  newtip = max(g$tips) + 1 # new tip node id
+  g$tips = c(g$tips, newtip) # update tips list
+  
+  if(target %in% g$internal)  target = target + 1  
+  
+  nlist = list()
+  for(i in 1:length(g$internal)) { 
+    nlist[[i]] = g$nl[[g$internal[i] ]]
   }
   
-  print(best_loss)  # Print the best loss
-  return(list(g = best_solution, loss = best_loss, losslist = losses))
+  for(i in length(g$internal):1){
+    g$nl[[g$internal[i]+1 ]] =  nlist[[i]]  
+    g$nl[[g$internal[i]+1]]$id = g$internal[i]+1
+    ## NEEDS TO UPDATE CHILDREN AND PARENTS OF INTERNAL NODES ##
+    g$nl[[g$internal[i]+1]]$parents = g$nl[[g$internal[i]+1]]$parents + 1
+    
+  }
+  
+  g$internal = g$internal + 1
+  g$root = g$root + 1
+  g$n = g$n + 1
+  
+  ptarget = g$nl[[target]]$parents[1] # parent of target node  
+    
+  newnode = max(g$internal)+1 # new internal node id
+  print(c("tip:", newtip, "newnode:",newnode, "target:", target))
+  # update labels
+  if(length(g$outgroup) > 0){
+    g$tip.label = c(g$tip.label[1:(length(g$tip.label) - 1)], label, g$tip.label[length(g$tip.label)])
+    } else g$tip.label = c(g$tip.label, label)
+  
+  g$internal[length(g$internal)+1] = newnode # update internal nodes list
+  
+  # update node relationships
+  
+  g$nl[[newtip]] = cnode_(newtip,t=0,d=runif(1),w=1, type = "split")
+  g$nl[[newnode]]$d = g$nl[[target]]$d/2
+  
+  g$nl[[newnode]]$children[1] = newtip
+  g$nl[[newnode]]$children[2] = target
+  g$nl[[newnode]]$parents[1] = ptarget
+  g$nl[[ptarget]]$children[1] = newnode
+  g$nl[[target]]$parents[1] = newnode
+  g$nl[[newtip]]$parents[1] = newnode
+  
+  return(g)
 }
+
+# install.packages("TreeSearch")
+# library(TreeSearch)
+# 
+# ?NNI()
+
+
+
+
 
