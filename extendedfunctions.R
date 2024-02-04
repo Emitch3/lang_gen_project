@@ -535,6 +535,7 @@ paths = function(edges, i, root){
 
 
 
+
 paths2 = function(g, i){
   root = g$root
   ni = g$nl[[i]]
@@ -604,6 +605,48 @@ ccov_dag_ = function(g, old=FALSE) {
   return(cov)
 }
 
+
+get_weightmatrix_ <- function(g) {
+  edges = edges.cg_(g)
+  p = NA
+  for(i in g$tips) {p[[i]] = paths(edges, i, g$root)}
+  #print("here")}
+  # make dictionary mapping edges to column numbers
+  dict = list()
+  l = 1
+  for(i in 1:length(g$nl)){
+    node = g$nl[[i]]
+    if(node$id == g$root) next
+    parents = node$parents
+    for(j in 1:length(parents)){
+      parent = parents[j]
+      edge =  paste0(node$id,"-",parent)
+      dict[as.character(edge)] = l
+      l = l + 1
+    }
+  }
+  W = NULL
+  for(i in g$tips){
+    for(j in g$tips){
+      if(i>j) next # skip duplicates ie. cov(A,B) = cov(B,A)
+      rowvec = NULL
+      for(m in 1:(length(g$nl)-1 + length(g$mix))) rowvec[m] = 0
+      for(k in 1:length(p[[i]])){
+        for (l in 1:length(p[[j]])){
+          p1 = p[[i]][[k]] 
+          p2 = p[[j]][[l]]
+          
+          overlap = p1$edge[ p1$edge %in% p2$edge] 
+          index = as.numeric(dict[overlap]) 
+          rowvec[index] = as.numeric(rowvec[index]) + unique(p1$weight)*unique(p2$weight)
+        }
+      }
+      W = rbind(W,unlist(rowvec))
+    }
+  }
+  colnames(W) = names(dict)
+  return(W)
+}
 
 
 get_weightmatrix_old = function(g) {
@@ -676,7 +719,7 @@ get_weightmatrix = function(g) {
           # remove mix edges since they have drift 0
           p1 = p1[p1$mix !=1,] 
           p2 = p2[p2$mix !=1,] 
-          
+
           overlap = p1$edge[ p1$edge %in% p2$edge] 
           index = as.numeric(dict[overlap]) 
           rowvec[index] = as.numeric(rowvec[index]) + unique(p1$weight)*unique(p2$weight)
@@ -685,9 +728,10 @@ get_weightmatrix = function(g) {
       W = rbind(W,unlist(rowvec))
     }
   }
-  colnames(W) =  names(dict)   #sort(names(dict))
+  colnames(W) = names(dict)   #sort(names(dict))
   return(W)
 }
+
 
 
 tr_flatten <- function(V){
@@ -705,16 +749,98 @@ tr_flatten <- function(V){
 
 
 get_depths <- function(g, V, trans){
-  #input topology g and covariance matrix and output depths
-  #V = ccov_dag_(g)
-  W = get_weightmatrix(g)
+  #input topology g and covariance matrix V, output depths
+  #W = get_weightmatrix(g)
   tr_V = tr_flatten(V)
-  edgenames = colnames(W)
-  
+  #edgenames = colnames(W)
   #X = t(W)%*%W
-  #sol = solve(X)%*%t(W)%*%(trans*tr_V)
+  #sol = MASS::ginv(X)%*%t(W)%*%(trans*tr_V) # solve(X)
   #sol = t(W)%*%solve(X)%*%(trans*tr_V) # qr decomposition
 
+  if(length(g$mix)>0) {
+    mix = g$mix
+    g0 = g
+    for(i in 1:length(mix)){   
+      g0 = removemixedge_(g0, i = mix[i]) 
+    }
+    d0 = get_depths(g0, data, trans)
+    new_tr_V = c(tr_V, d0[grep(paste("^", as.character(g$nl[[mix[1] ]]$children[1]), "-", sep=""), names(d0))])
+    
+    W = get_weightmatrix(g)
+    edgenames = colnames(W)
+    
+    newrow = rep(0,ncol(W))
+    idx = grep(mix[1],colnames(W))
+    newrow[idx] = 1
+    new_W = rbind(W,newrow)
+    
+    if(!identical(trans,1)) {new_trans = c(trans,1)
+      }else new_trans = 1
+
+    #if(nrow(new_W) !=length(new_tr_V) ) {
+    #    print(g$nl[[mix[1] ]]$children[1])
+    #    print(g$tips)
+    #    print(intersect(g$nl[[mix[1] ]]$children[1], g$tips))
+    #    print(new_tr_V)  
+    #    #print(g$nl[[mix[1] ]]$children[1])
+    #    #print(d0[grep(intersect(g$nl[[mix[1] ]]$children[1], g$tips), names(d0))])
+    #    #print(new_tr_V) 
+    #    #print(g$mix)}
+    # }
+    d = nnls::nnls(new_W,new_trans*new_tr_V)$x
+    names(d) = edgenames
+    sol = d0
+    sol[idx] = d[idx]
+    names(sol) = edgenames
+    return(sol)
+    #return(d)
+  }
+  else{
+    W = get_weightmatrix(g)
+    edgenames = colnames(W)
+  }
+  sol = nnls::nnls(W,trans*tr_V)$x
+  names(sol) = edgenames
+  return(sol)
+}
+
+
+g = tinf1$g
+get_depths2(tg1,data,transvector(data))
+d = get_depths2(tg0,data,transvector(data)) 
+get_depths(tg0,data,transvector(data)) 
+plot.cg_(tg1)
+
+ng = parameterise_(g, d,"d")
+plot.cg_(ng)
+
+ctree_loss2_(ng,data)
+
+get_depths <- function(g, V, trans){
+  #input topology g and covariance matrix V, output depths
+  #W = get_weightmatrix(g)
+  tr_V = tr_flatten(V)
+  #edgenames = colnames(W)
+  #X = t(W)%*%W
+  #sol = MASS::ginv(X)%*%t(W)%*%(trans*tr_V) # solve(X)
+  #sol = t(W)%*%solve(X)%*%(trans*tr_V) # qr decomposition
+  
+  if(length(g$mix)>0) {
+    mix = g$mix
+    g0 = g
+    for(i in 1:length(mix)){   
+      g0 = removemixedge_(g0, i = mix[i]) 
+    }
+    W0 = get_weightmatrix(g0)
+    edgenames = colnames(W0)
+    sol = nnls::nnls(W0,trans*tr_V)$x
+    names(sol) = edgenames
+    return(sol)
+  }
+  else{
+    W = get_weightmatrix(g)
+    edgenames = colnames(W)
+  }
   sol = nnls::nnls(W,trans*tr_V)$x
   names(sol) = edgenames
   return(sol)
@@ -723,7 +849,6 @@ get_depths <- function(g, V, trans){
 
 mypruneregraft_ <- function(g,source,target,careful=FALSE){
   ## prunes source node branch and attaches it to the target node branch
-  
   ## Run this ONLY on type=="split" nodes!
   gstart=g
   psourceroot=FALSE
@@ -783,11 +908,9 @@ mypruneregraft_ <- function(g,source,target,careful=FALSE){
   if(careful) {
     if(!checkgraph(g)){
       print(paste("Moving",source,"to",target))
-      #print(g)
       stop("Created invalid graph!")
     }
   }
-  print(g$nl[[7]]$children)
   g
 }
 
@@ -1102,12 +1225,11 @@ randomregraftmixture_<-function(g,add=FALSE,maxtries=200,...){
     if(ntries==maxtries) stop("Error! Reached maximum number of attempts to find valid tree move!")
   }
   
-  alpha= runif(1,0.01,0.5)
+  alpha= 0 #runif(1,0.01,0.5)
   w=runif(1,0.01,0.5)
   ret=list(rem=rem,source=ret[1],target=ret[2],alpha=alpha,w=w)
   return(ret)
 }
-
 
 
 reversemixture_<-function(g){
@@ -1130,7 +1252,6 @@ reversemixture_<-function(g){
 }
 
 
-
 dagstep_ <- function(g,data,control=defaultcontrol,freqs=c(1/5,1/5,1/5,1/5,1/5),verbose=FALSE,...){
   ## Do one iteration of the graph
   movetype=sample(1:5,1,prob=freqs)
@@ -1149,6 +1270,10 @@ dagstep_ <- function(g,data,control=defaultcontrol,freqs=c(1/5,1/5,1/5,1/5,1/5),
     proposal=reversemixture_(g)
   }else if(movetype==5){
     proposal = myNNIstep(g)
+  }else if(movetype==6){
+    proposal0 = myNNIstep(g)
+    proposal = myregraftmixedgestep_(proposal0$g)
+    proposal$swap = proposal0$swap
   }else stop("Invalid move type in dagstep?!")
   if(verbose){
     print(paste("proposal: movetype",movetype,
@@ -1211,17 +1336,16 @@ parameterise_<-function(g, pars, what){
       if(g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] < 0 ) stop("Error: sum of admix weights to admix target exceeds 1")
       g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] = pars[i]
     }
-    
   }
   return(g)
 }
+
 
 w_loss <- function(w, g0, mix, data, trans){
   #weights = c(w,1-w) #Map(c,w,1-w)
   #mix = g0$mix
   #if(length(w) != length(mix)) stop("Error: invalid weight input")
   #if(length(mix)>0) for(j in 1:length(mix)){
-  
   
   idx = which(g0$nl[[ g0$nl[[mix]]$children[2] ]]$parents == mix)
 
@@ -1237,18 +1361,19 @@ w_loss <- function(w, g0, mix, data, trans){
 }
 
 
-infer_weight <- function(g, mix, data, trans){
+infer_weight <- function(g, mix, data){
   if(!(mix %in% g$mix)) stop("Error: mix is not a mixture node")  
   
   idx = which(g$nl[[ g$nl[[mix]]$children[2] ]]$parents == mix)
   upper = g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] + g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] - 0.05
   w = runif(1,0.05,upper)
   
-  opt=optimize(f = function(w) w_loss(w, g, mix, data, trans),
-               maximum = FALSE, tol = 0.1,
+  opt=optimize(f = function(w) w_loss(w, g, mix, data, trans=1),
+               maximum = FALSE, tol = 0.01,
                interval = c(0.05, upper))
   return(opt$minimum)
 }
+
 
 
 parameterise_mix <- function(g, alphas, weights){
@@ -1273,12 +1398,6 @@ parameterise_mix <- function(g, alphas, weights){
 }
 
 
-#mixparams_loss <- function(alphas, weights, gref, dataref){
-#  g = parameterise_mix(g = gref, alphas, weights)
-#  loss = ctree_loss2_(gref = gref, dataref = dataref)
-#  return(loss)
-#}
-
 mixparams_loss <- function(params, gref, dataref){
   alphas <- params[1:length(gref$mix)]
   weights <- params[(length(gref$mix)+1):(2*length(gref$mix))]
@@ -1293,50 +1412,65 @@ infer_mixparams <- function(g, data, method = "L-BFGS-B", control=defaultcontrol
   
   ## CAREFUL: not implemented for multiple admix to same target node ##
   weights <- runif(length(g$mix),0.05,0.95)
-  alphas <- runif(length(g$mix),0.05,0.95)  
+  alphas <- runif(length(g$mix),0.05,0.95) 
   
   opt = optim(par = c(alphas,weights),
-              fn = mixparams_loss,
-              gref=g,
-              method=method,
-              dataref=data,lower=0.05,
-              upper=0.95,
-              control = list(pgtol=0.01))
+             fn = mixparams_loss,
+             gref=g,
+             method=method,
+             dataref=data,lower=0.05,
+             upper=0.95,
+             control = list(trace = FALSE, factr=1e-7, maxit = 100)) 
   
-  g = parameterise_mix(g, opt$par[1], opt$par[2])
+  g = parameterise_mix(g, alphas = opt$par[1], weights = opt$par[2])
   list(g=g,par=opt$par,loss=opt$value)
 }
 
 
-infer_graph <- function(g, data,maxiter=100,losstol=0.01, verbose = FALSE, transform = FALSE){
-  if(transform){
-    # least-squares transformation vector
-    # reverses the scaling effect of admixture on population variance
-    Y = diag(diag(data))/data[ncol(data),ncol(data)] 
-    inv_Y = solve(Y)
-    trans = tr_flatten(inv_Y) #inv_Y[upper.tri(inv_Y, diag = T)]
-    trans[trans == 0] = 1
-  } else trans = 1
+#infer_mixparams(ng, data = data)$par
+    ## Movetypes ##
+    # movetype 1 = prune and regraft
+    # movetype 2 = prune and regraft mix edge
+    # movetype 3 = prune and regraft
   
+transvector <- function(data){
+  # least-squares transformation vector
+  # reverses the scaling effect of admixture on population variance
+  Y = diag(diag(data))/data[ncol(data),ncol(data)] 
+  inv_Y = solve(Y)
+  trans = tr_flatten(inv_Y) 
+  trans[trans == 0] = 1
+  return(trans)
+}
+
+
+infer_graph <- function(g, data,maxiter=100,losstol=0.01, movefreqs = c(1/5,1/5,1/5,1/5,1/5) ,verbose = FALSE){
+
+  trans = transvector(data)
+
   loss = ctree_loss2_(g,data)
   losses=rep(NA,maxiter)
   losses[1]=loss
   
   if(maxiter>1) for(i in 2:maxiter){
-   proposal0 = dagstep_(g, data, verbose = verbose)
+    proposal0 = dagstep_(g, data, freqs = movefreqs, verbose = verbose)
+    
+    #d = get_depths(proposal0, data, trans)
+    #proposal = parameterise_(proposal0, pars=d, what = "d")
+    
+    if(length(proposal0$mix)>0){
+      #proposal = infer_mixparams(proposal, data)$g
+      w = sapply(proposal0$mix, function(mix) infer_weight(proposal0, mix, data))
+      proposal0 = parameterise_(proposal0, pars=w, what = "w")
+      }
    
-   if(length(proposal0$mix)>0){
-    # proposal = infer_mixparams(proposal, data)$g
-    w = sapply(proposal0$mix, function(mix) infer_weight(proposal0, mix, data, trans))
-    proposal0 = parameterise_(proposal0, pars=w, what = "w")     
-   }
-   p = get_depths(proposal0, data, trans)
-   proposal = parameterise_(proposal0, pars=p, what = "d")
-   
+    d = get_depths(proposal0, data, trans)
+    proposal = parameterise_(proposal0, pars=d, what = "d")
+    
    newloss = ctree_loss2_(proposal,data)
    
    if (newloss < loss){
-     print(c("Current loss:", newloss))
+     print(c("Iteration:", i," Current loss:", newloss))
      g = proposal
      loss = newloss
    }
@@ -1348,7 +1482,6 @@ infer_graph <- function(g, data,maxiter=100,losstol=0.01, verbose = FALSE, trans
   print(c("Final loss:", loss))  
   return(list(g = g, loss = loss, loss_list = losses))
 }
-
 
 
 
