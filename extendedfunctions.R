@@ -3,7 +3,6 @@ source("mixfunctions.R")
 library("Clarity")
 
 
-
 cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA,mixchild=NA){
   ## This is the generic function to create or update a node
   ## Pass an id to create a new node
@@ -34,7 +33,7 @@ cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA,mixch
   }
 }
 
-simCoal_<-function(n,times="coal", alpha = 1, labels=paste0("t",1:n),outgroup=numeric()){
+simCoal_<-function(n,times="coal",labels=paste0("t",1:n),outgroup=numeric()){ #alpha = 1, 
   ## Simulate a coalescent tree 
   nodes = list()
   for(i in 1:n) nodes[[i]]=cnode_(i,t=0,d=0,w=1)
@@ -46,7 +45,7 @@ simCoal_<-function(n,times="coal", alpha = 1, labels=paste0("t",1:n),outgroup=nu
   for(i in n:2){
     ii <- length(nodes) + 1    
     if(length(alive) < 3) nChildren = 2
-      else  nChildren = 2# sample(c(2,3), 1, prob = c(alpha, 1 - alpha)) #max(2,sample(1:length(alive), 1))
+      else  nChildren = 2 # sample(c(2,3), 1, prob = c(alpha, 1 - alpha)) #max(2,sample(1:length(alive), 1))
     clist <- sample(alive,nChildren)
     
     if(times == "coal"){
@@ -161,13 +160,15 @@ removemixedge_ <- function(g,i,careful=TRUE){
   ## Remove the node at index i
   ## If we are careful, we expect a proper graph
   ## Otherwise we accept missing right children for "dangling" mixture nodes with no right child
+
   if(g$nl[[i]]$type!="mixture") stop(paste("ERROR: Invalid request to remove node",i,"which is not a mixture edge"))
   
   csource = g$nl[[i]]$children[1] # child from source node
   ctarget = g$nl[[i]]$children[2] # child from target node
-  originalparent = g$nl[[i]]$parents[1] # mixture node's (split) parent
+  osourceparent = g$nl[[i]]$parents[1] # mixture node's (split) parent
+  
   if(is.na(csource) && is.na(ctarget)) stop(paste("ERROR: node",i,"has no children!")) 
-  if(is.na(originalparent) && (i != g$root)) stop(paste("ERROR: node",i,"has no parents!"))
+  if(is.na(osourceparent) && (i != g$root)) stop(paste("ERROR: node",i,"has no parents!"))
   #if(is.na(cr)&&careful) stop(paste("ERROR: node",i,"has no right child!"))  
   
   if(length(g$nl[[i]]$parents) > 1 ){ #if mixture node has any mixture parents
@@ -177,7 +178,9 @@ removemixedge_ <- function(g,i,careful=TRUE){
   }
   
   ## Update source child
-  g$nl[[csource]]$parents = originalparent
+  pt0 <- g$nl[[csource]]$parents
+
+  g$nl[[csource]]$parents = c(osourceparent,  pt0[pt0 != i])  ### bug ###
   g$nl[[csource]]$d  = g$nl[[i]]$d + g$nl[[csource]]$d
   
   ## Update target child
@@ -185,12 +188,14 @@ removemixedge_ <- function(g,i,careful=TRUE){
   
   g$nl[[ctarget]]$parents <- pt[pt != i]
   g$nl[[ctarget]]$w[1] = g$nl[[ctarget]]$w[1] + g$nl[[ctarget]]$w[pt == i]
+  
   g$nl[[ctarget]]$w = g$nl[[ctarget]]$w[pt != i]
   
   ## Update original parent
   # if(g$root!=i){
-  idx <- which(g$nl[[originalparent]]$children == i)
-  g$nl[[originalparent]]$children[idx] = csource
+  idx <- which(g$nl[[osourceparent]]$children == i)
+  
+  g$nl[[osourceparent]]$children[idx] = csource
   
   # }else{ # Its the root; have to make the left child the new root
   #  g$root=cl
@@ -538,6 +543,40 @@ paths = function(edges, i, root){
 }
 
 
+# OLDget_paths <- function(edges, i ,root){
+#   done = FALSE
+#   paths= list()
+#   index = which(edges$child == i)
+#   path_weights = c(1,1)
+#   path = NULL
+#   
+#   while(!done){
+#     if(length(index)>1){
+#       idx = index[which(edges[index,]$mix==0)]
+#       path2 = get_path(edges, index[index!=idx], root)
+#       path2 = rbind(path,path2)
+#       path_weights = edges[index,]$weight
+#       path2$weight = path_weights[1]
+#       paths[[length(paths)+1]] = path2
+#     }else idx = index
+#     
+#     E = edges[idx,]
+#     edge = paste0(E$child,"-", E$parent)
+#     r = cbind(edge, E)
+#     path = rbind(path,r)   
+#     index = which(edges$child %in% E$parent)
+#     if(length(E$parent)>1) stop(return(edges))
+#     
+#     if(E$parent == root) {
+#       path$weight = path_weights[2]
+#       paths[[length(paths)+1]] = path
+#       done = TRUE
+#     }
+#   }
+#   return(paths)
+# }
+
+
 get_path <- function(edges, idx, root){
   path = NULL
   done = FALSE
@@ -546,33 +585,53 @@ get_path <- function(edges, idx, root){
     edge = paste0(E$child,"-", E$parent)
     r = cbind(edge, E)
     path = rbind(path,r) 
-    if(length(E$parent)>1) stop(return(edges))
+    if(length(E$parent)>1) stop("length(E$parent)>1")
     
     if(E$parent == root) { done = TRUE
     return(path)
     }
     
     idx = which(edges$child %in% E$parent)
-    i = E$parent
+    
+    if(length(idx)>1) {
+      k = E$child
+      plist = get_paths(edges, k, root)
+      ret = lapply(plist, function(x) rbind( path[nrow(path)-1,],x))
+      return(ret)
+      }
   }
   return(path)
 }
+
 
 get_paths <- function(edges, i ,root){
   done = FALSE
   paths= list()
   index = which(edges$child == i)
-  path_weights = c(1,1)
+  #path_weights = c(1,1)
   path = NULL
   
   while(!done){
+    
     if(length(index)>1){
       idx = index[which(edges[index,]$mix==0)]
-      path2 = get_path(edges, index[index!=idx], root)
-      path2 = rbind(path,path2)
-      path_weights = edges[index,]$weight
-      path2$weight = path_weights[1]
-      paths[[length(paths)+1]] = path2
+      for (j in index[index!=idx]) {
+        path2 = get_path(edges, j, root)  
+        
+        if(is(path2, "list")){
+          path2 = lapply(path2, function(x) rbind(path,x))
+          path2 <- lapply(path2, function(df) {
+            df$weight <- prod(df$weight)
+            return(df)} )
+          
+          paths = append(paths, path2 )
+            
+        }  else{ path2 = rbind(path,path2)
+          path2$weight = prod(path2$weight) 
+          paths[[length(paths)+1]] = path2 
+        }
+        
+      }
     }else idx = index
     
     E = edges[idx,]
@@ -580,10 +639,10 @@ get_paths <- function(edges, i ,root){
     r = cbind(edge, E)
     path = rbind(path,r)   
     index = which(edges$child %in% E$parent)
-    if(length(E$parent)>1) stop(return(edges))
+    if(length(E$parent)>1) stop("length(E$parent)>1")
     
     if(E$parent == root) {
-      path$weight = path_weights[2]
+      path$weight = prod(path$weight) #path_weights[2]
       paths[[length(paths)+1]] = path
       done = TRUE
     }
@@ -591,6 +650,18 @@ get_paths <- function(edges, i ,root){
   return(paths)
 }
 
+# get_paths(edges,i=2,11)
+# 
+# path2  =get_path(edges, i=2, root = g2$root)
+# 
+# path2
+# 
+# get_weightmatrix(g2)
+# 
+# get_depths(g2,data)
+# 
+# evaluate_proposal(trand1,dataref[[1]],verbose = T)
+# 
 
 # paths2 = function(g, i){
 #   root = g$root
@@ -649,6 +720,12 @@ Vij = function(Paths_i, Paths_j){
 
 
 ccov_dag_ = function(g, old=FALSE) {
+  ## compute the covariance matrix for each graph in cglist
+  if(is(g,"cglist")){
+    ret = lapply(g,ccov_dag_)
+    return(ret)
+  }
+  
   root = g$root
   ntips = g$n
   p = list(length = ntips)
@@ -667,37 +744,35 @@ ccov_dag_ = function(g, old=FALSE) {
   return(cov)
 }
 
-ccov_dag_old = function(g, old=FALSE) {
-  root = g$root
-  ntips = g$n
-  p = list(length = ntips)
-  
-  if(old){edges = edges.cg(g)
-  }else edges = edges.cg_(g)
-  
-  for(i in 1:ntips){
-    p[[i]] = paths(edges, i,root)
-  }  
-  cov = sapply(1:ntips, function(i) {
-    sapply(1:ntips, function(j) {
-      Vij(p[[i]], p[[j]])})
-  })
-  dimnames(cov) = list(g$tip.label, g$tip.label)
-  return(cov)
-}
+# ccov_dag_old = function(g, old=FALSE) {
+#   root = g$root
+#   ntips = g$n
+#   p = list(length = ntips)
+#   
+#   if(old){edges = edges.cg(g)
+#   }else edges = edges.cg_(g)
+#   
+#   for(i in 1:ntips){
+#     p[[i]] = paths(edges, i,root)
+#   }  
+#   cov = sapply(1:ntips, function(i) {
+#     sapply(1:ntips, function(j) {
+#       Vij(p[[i]], p[[j]])})
+#   })
+#   dimnames(cov) = list(g$tip.label, g$tip.label)
+#   return(cov)
+# }
 
 
 
 get_weightmatrix = function(g) {
   edges = edges.cg_(g)
-  
   p = list()
-  for(i in g$tips) {p[[i]] = get_paths(edges, i, g$root)
-  }
+  for(i in g$tips){ p[[i]] = get_paths(edges, i, g$root) }
   ## make dictionary mapping edges to column numbers
   dict = list()
   l = 1
-
+  
   for(i in 1:length(g$nl)){
     node = g$nl[[i]]
     if(node$id == g$root) next
@@ -706,7 +781,6 @@ get_weightmatrix = function(g) {
     dict[as.character(edge)] = l
     l = l + 1
   }
-
   W = NULL
   for(i in g$tips){
     for(j in g$tips){
@@ -729,74 +803,71 @@ get_weightmatrix = function(g) {
       W = rbind(W,unlist(rowvec))
     }
   }
-  colnames(W) = names(dict)   #sort(names(dict))
+  colnames(W) = names(dict)  
   return(W)
 }
 
 
-
-
-
-get_weightmatrixOLD = function(g) {
-  ## Includes admix edge
-  
-  edges = edges.cg_(g)
-
-  p = list()
-  for(i in g$tips) {p[[i]] = get_paths(edges, i, g$root)
-  }
-  ## make dictionary mapping edges to column numbers
-  # dict = list()
-  # l = 1
-  # 
-  # for(i in 1:length(g$nl)){
-  #   node = g$nl[[i]]
-  #   if(node$id == g$root) next
-  #   parent = node$parents[1]
-  #   edge =  paste0(node$id,"-",parent)
-  #   dict[as.character(edge)] = l
-  #   l = l + 1
-  # }
-  # make dictionary mapping edges to column numbers
-  dict = list()
-  l = 1
-  for(i in 1:length(g$nl)){
-    node = g$nl[[i]]
-    if(node$id == g$root) next
-    parents = node$parents
-    for(j in 1:length(parents)){
-      parent = parents[j]
-      edge =  paste0(node$id,"-",parent)
-      dict[as.character(edge)] = l
-      l = l + 1
-    }
-  }
-  
-  W = NULL
-  for(i in g$tips){
-    for(j in g$tips){
-      if(i>j) next # skip duplicates ie. cov(A,B) = cov(B,A)
-      rowvec = NULL
-      for(m in 1:(length(g$nl) +length(g$mix)-1)) rowvec[m] = 0
-      for(k in 1:length(p[[i]])){
-        for (l in 1:length(p[[j]])){
-          p1 = p[[i]][[k]] 
-          p2 = p[[j]][[l]]
-          ## remove mix edges since they have drift 0
-          # p1 = p1[p1$mix !=1,] 
-          # p2 = p2[p2$mix !=1,] 
-          
-          overlap = p1$edge[ p1$edge %in% p2$edge] 
-          index = as.numeric(dict[overlap]) 
-          rowvec[index] = as.numeric(rowvec[index]) + unique(p1$weight)*unique(p2$weight)
-        }
-      }
-      W = rbind(W,unlist(rowvec))
-    }
-  }
-  colnames(W) = names(dict)   #sort(names(dict))
-  return(W)
-}
+# get_weightmatrixOLD = function(g) {
+#   ## Includes admix edge
+#   
+#   edges = edges.cg_(g)
+# 
+#   p = list()
+#   for(i in g$tips) {p[[i]] = get_paths(edges, i, g$root)
+#   }
+#   ## make dictionary mapping edges to column numbers
+#   # dict = list()
+#   # l = 1
+#   # 
+#   # for(i in 1:length(g$nl)){
+#   #   node = g$nl[[i]]
+#   #   if(node$id == g$root) next
+#   #   parent = node$parents[1]
+#   #   edge =  paste0(node$id,"-",parent)
+#   #   dict[as.character(edge)] = l
+#   #   l = l + 1
+#   # }
+#   # make dictionary mapping edges to column numbers
+#   dict = list()
+#   l = 1
+#   for(i in 1:length(g$nl)){
+#     node = g$nl[[i]]
+#     if(node$id == g$root) next
+#     parents = node$parents
+#     for(j in 1:length(parents)){
+#       parent = parents[j]
+#       edge =  paste0(node$id,"-",parent)
+#       dict[as.character(edge)] = l
+#       l = l + 1
+#     }
+#   }
+#   
+#   W = NULL
+#   for(i in g$tips){
+#     for(j in g$tips){
+#       if(i>j) next # skip duplicates ie. cov(A,B) = cov(B,A)
+#       rowvec = NULL
+#       for(m in 1:(length(g$nl) +length(g$mix)-1)) rowvec[m] = 0
+#       for(k in 1:length(p[[i]])){
+#         for (l in 1:length(p[[j]])){
+#           p1 = p[[i]][[k]] 
+#           p2 = p[[j]][[l]]
+#           ## remove mix edges since they have drift 0
+#           # p1 = p1[p1$mix !=1,] 
+#           # p2 = p2[p2$mix !=1,] 
+#           
+#           overlap = p1$edge[ p1$edge %in% p2$edge] 
+#           index = as.numeric(dict[overlap]) 
+#           rowvec[index] = as.numeric(rowvec[index]) + unique(p1$weight)*unique(p2$weight)
+#         }
+#       }
+#       W = rbind(W,unlist(rowvec))
+#     }
+#   }
+#   colnames(W) = names(dict)   #sort(names(dict))
+#   return(W)
+# }
 
 
 
@@ -955,6 +1026,11 @@ get_depths <- function(g, V){
 mypruneregraft_ <- function(g,source,target,careful=FALSE){
   ## prunes source node branch and attaches it to the target node branch
   ## Run this ONLY on type=="split" nodes!
+  if(is(g,"cglist")){
+    gtest=lapply(g,function(g) mypruneregraft_(g,source,target))
+    class(gtest)="cglist"
+    return(gtest)
+  }
   gstart=g
   psourceroot=FALSE
   ptargetroot=FALSE
@@ -1022,6 +1098,7 @@ mypruneregraft_ <- function(g,source,target,careful=FALSE){
 }
 
 
+
 getp_<-function(g){
   if(is(g,"cglist")) return(getp_(g[[1]]))
   ## Extracts the indices of parameters of each type
@@ -1080,7 +1157,16 @@ isvalidregraftpair_<-function(g,swap){
   if((!is.na(g$nl[[swap[1]]]$parents[1])) && (g$nl[[swap[1]]]$parents[1]==swap[2])) {
     #print("The target is the parent of the source")
     done=FALSE
-    }
+  }
+  
+  # ocsource = g$nl[[psource]]$children 
+  # ocsource = ocsource[ocsource!=source] 
+  
+  
+  
+  ## Parent of the target is the root
+  if(is.na(g$nl[[swap[2]]]$parent[1] == g$root)) done = FALSE
+    
   ## The target is a descendent of the source
   if(swap[2] %in% nodesunder_(g,swap[[1]])) {
     #print("The target is a descendent of the source")
@@ -1100,8 +1186,6 @@ isvalidregraftpair_<-function(g,swap){
   }
   return(done)
 }
-
-
 
 
 
@@ -1161,7 +1245,7 @@ randomnodes<-function(g,n=2,root=FALSE,mix=FALSE,tips=TRUE,internal=TRUE, outgro
   valid=numeric()
   if(tips) valid=c(valid,g$tips)
   if(internal) valid=c(valid,g$internal)
-  if(!mix) if(length(g$mix)>0) valid = valid[valid!=g$mix]     
+  if(!mix) if(length(g$mix)>0) valid = valid[!valid %in% g$mix]
   #if(mix) valid=c(valid,g$mix)
   if(!root) valid=valid[!(valid%in%g$root)]
   if(!outgroup) valid=valid[!(valid%in%tog)]
@@ -1177,9 +1261,7 @@ randomregraftpair_<-function(g,maxtries=400,...){
   done=FALSE
   ntries=0
   while(!done){
-    #        print(paste("... random prune pair try",ntries)) ## DEBUG
     ret=randomnodes(g,...)
-    #        print(paste(ret,collapse=",")) ## DEBUG
     for(i in 1:length(ret)) {
       while(TRUE){
         ii=ret[i]
@@ -1192,10 +1274,37 @@ randomregraftpair_<-function(g,maxtries=400,...){
     done=isvalidregraftpair_(g,ret)
     ntries=ntries+1
     
-    if(ntries==maxtries) stop("Error! Reached maximum number of attempts to find valid tree move!")
+    if(ntries==maxtries) return("No prune & regraft pairs") #stop("Error! Reached maximum number of attempts to find valid tree move!")
   }
   return(ret)
 }
+
+
+get_nonmixparent <-function(g,i){
+  done=FALSE
+  mix = g$mix
+  node = g$nl[[i]]$parents[1]
+  while (!done) {
+    if(!(node %in% mix)){ done = TRUE
+    } else node = g$nl[[node]]$parents[1]
+    }
+  return(node)
+}
+
+
+get_mixparents <- function(g,i){
+  done=FALSE
+  mix = g$mix
+  nodes = NULL
+  node = g$nl[[i]]$parents[1]
+  while (!done) {
+    if(!(node %in% mix)){ done = TRUE
+    } else {nodes[length(nodes)+1] = node
+    node = g$nl[[node]]$parents[1]}
+  }
+  return(nodes)
+}
+
 
 
 randomprunemixpars <- function(g, maxtries=400,add=FALSE){
@@ -1204,40 +1313,81 @@ randomprunemixpars <- function(g, maxtries=400,add=FALSE){
   done1 = FALSE
   done2 = FALSE
   
-  while(!done){
-    if(add){
-      rem=NA
-    }else{
-      ## Which node to remove?
-      if(length(g$mix)==1) rem=g$mix
-      else rem=sample(g$mix,1)
-    }
-    source = g$nl[[rem]]$children[1]
-    target = g$nl[[rem]]$children[2]
-    while(!done1){
-      # node1 = c(source, target)[sample(1:2,1)]
-      # node2 = randomnodes(g,n=1,internal = T,mix=FALSE)
-      prswap = sample(c(source,target)) #sample(c(node1, node2))
-      done1=isvalidregraftpair_(g,prswap)
+ # while(!done){
+    while(!done1){    
+      if(add){
+        rem=NA
+      }else{
+        ## Which node to remove?
+        if(length(g$mix)==1) rem=g$mix
+        else rem=sample(g$mix,1)
+      }
+      source = g$nl[[rem]]$children[1]
+      psource = g$nl[[rem]]$parents[1]
+      #if(source %in% g$mix) source = tipsunder_(g,source)[1]
+      target = g$nl[[rem]]$children[2]
+      ptarget = g$nl[[target]]$parents[1]
+      
+      g0 = removemixedge_(g,i = rem)  
+      
+      if( psource %in% g$mix || source %in% g$mix ) {
+          source = g$nl[[get_nonmixparent(g, source)]]$children[2]
+          if(source == rem) source = g$nl[[source]]$children[1]
+        }
+        
+        #{prswap = sample(c(g$nl[[get_nonmixparent(g, source)]]$children[2], target)) #prswap = sample(c(get_nonmixparent(g, source), target))  
+      if(ptarget %in% g$mix) {
+        target = g$nl[[get_nonmixparent(g, target)]]$children[2]
+        if(target == rem) next
+        }
+      
+      
+        #{prswap = sample(c(source, g$nl[[get_nonmixparent(g, target)]]$children[2])) #prswap = sample(c(source, get_nonmixparent(g, target)))  
+      #}else prswap = sample(c(source,target))
+      
+      prswap = sample(c(source,target))
+      done1=isvalidregraftpair_(g0,prswap)
       ntries=ntries+1
-      if(ntries==maxtries) stop("Error! Reached maximum number of attempts to find valid tree move!")
+      #print(ntries)
+      if(ntries==maxtries) return("no valid prune/regraft parameters") #stop("Error! Reached maximum number of attempts to find valid tree move!")
     }
     ntries=0
-    g0 = removemixedge_(g,i = rem)    
-    g0 = mypruneregraft_(g0, source = prswap[1], target = prswap[2])  
+    g1 = mypruneregraft_(g0, source = prswap[1], target = prswap[2])
     while(!done2){
       node1 = c(source, target)[sample(1:2,1)]
       node2 = randomnodes(g,n=1,internal = T,mix=FALSE)
       mixswap = sample(c(node1,node2))
-      done2 = isvalidregraftmixture_(g0,rem=NA,mixswap)
+      done2 = isvalidregraftmixture_(g1,rem=NA,mixswap)
       ntries=ntries+1
-      if(ntries==maxtries) stop("Error! Reached maximum number of attempts to find valid tree move!")
+      #print(ntries)
+      if(ntries==maxtries) return("no valid mixswap parameters")  #stop("Error! Reached maximum number of attempts to find valid tree move!")
     }
-    done = done1&&done2
-  }
+    #done = done1&&done2
+  #}
   ret=list(rem=rem,prsource=prswap[1],prtarget=prswap[2],mixsource=mixswap[1], mixtarget=mixswap[2])
   return(ret)
 }
+
+
+# mixnodes = get_mixparents(g,source)
+# 
+# g0=g
+# for(i in mixnodes){
+#   g0 = removemixedge_(g0,i=i)
+# }
+# plot.cg_(g0)
+# 
+# for(rem in mixnodes){
+#   while(!done){
+#     ret= randomnodes(g,internal = T,mix=F)
+#     done=isvalidregraftmixture_(g,rem,ret)
+#     ntries=ntries+1
+#   }
+#   g0 = myregraftmixedge_(g0,i=NA, source= ret[1],target =ret[2],0.5,0.1)
+# }
+# 
+# 
+# rem
 
 
 mypruneregraftstep_<-function(g){
@@ -1250,20 +1400,56 @@ mypruneregraftstep_<-function(g){
     swap=randomregraftpair_(g)
     gtest=mypruneregraft_(g,swap[1],swap[2])
   }
-  #print(swap)
   list(g=gtest,swap=swap,mixswap=NA)
 }
 
 
-ctree_loss2_<-function(gref,dataref,center=FALSE, lambda=0.1){
+ctree_loss2_<-function(gref,dataref, lambda=0){
   ## Evaluate the loss for a parameterised graph of class cg, NOT a cglist
   pred<-ccov_dag_(gref)
   dataref=dataref[gref$tip.label,gref$tip.label]
   loss<-sum(na.omit(as.numeric((pred-dataref)^2)))
   # penalisation term for the diagonals
-  # penalty <- lambda * sum(diag(pred)^2)
+  #d = diag(pred)
+  # penalty <- lambda * sum((d-mean(d))^2)
+  # loss = loss + penalty
   return(loss)
 }
+
+ctree_loss_<-function(gref,dataref){
+  if(is(gref,"cglist")){
+    if((!is(dataref,"list")) || (length(gref) != length(dataref))){
+      stop("Mismatch betweek number of graphs and parameters!")
+    }
+  }
+  ## Report the loss for a PARAMETERISED graph
+  if(is(dataref,"list")){
+    losslist<-lapply(1:length(dataref),function(i){
+      ctree_loss2_(gref[[i]],dataref[[i]])
+    })
+    loss = Reduce("+",losslist)
+  }else{
+    loss = ctree_loss2_(gref,dataref,center)
+  }
+  loss
+}
+
+# ctree_loss_<-function(gref,dataref,center=FALSE){
+#   if(is(gref,"cglist")){
+#     if((!is(dataref,"list")) || (length(gref) != length(dataref))){
+#       stop("Mismatch betweek number of graphs and parameters!")
+#     }
+#   } 
+#   ## Evaluate the loss for a parameterised graph of class cg, NOT a cglist
+#   pred<-ccov_dag_(gref)
+#   dataref=dataref[gref$tip.label,gref$tip.label]
+#   loss<-sum(na.omit(as.numeric((pred-dataref)^2)))
+#   # penalisation term for the diagonals
+#   d = diag(pred)
+#   # penalty <- lambda * sum((d-mean(d))^2)
+#   # loss = loss + penalty
+#   return(loss)
+# }
 
 
 infergraphpar_<-function(g,ctree_loss,
@@ -1276,7 +1462,7 @@ infergraphpar_<-function(g,ctree_loss,
   p = gparvec_(g,invtrans=F)
   
   lower=rep(lower,length(p))
-  opt=optim(p,ctree_loss2_,
+  opt=optim(p,ctree_loss_,
             gref=g,
             method=method,
             dataref=data,lower=lower,
@@ -1334,14 +1520,27 @@ isvalidregraftmixture_<-function(g,rem,ret){
   }
   ## nodes share a parent
   if((!is.na(parsource)) && (!is.na(partarget)) && (parsource==partarget) ) {
-    #print("nodes share a parent")
+    #print("Nodes share a parent")
     return(FALSE)
   }
+  ## nodes share a parent (and there are mix nodes in the way)
+  if(get_nonmixparent(g,ret[1])==get_nonmixparent(g,ret[2])) {
+    #print("Nodes share a parent")
+    return(FALSE)
+  }
+  
   ## The target is the parent of the source
   if((!is.na(parsource)) && (parsource==ret[2]) ) {
     #print("The target is the parent of the source")
     return(FALSE)
   }
+  
+  # There is already mixture between the source and target
+  if(parsource %in% g$mix && g$nl[[parsource]]$children[2] == ret[2]){
+    #print("There is already mixture between the source and target")
+    return(FALSE)
+  }
+  
   #######  CARE HERE:
   
   ## The source bifurcates before the target bifurcates
@@ -1365,6 +1564,7 @@ isvalidregraftmixture_<-function(g,rem,ret){
     return(FALSE)
     }
   #######      
+  
   
   ## The target or the source is a mixture node 
   if(ret[1] %in% g$mix || ret[2] %in% g$mix) {
@@ -1415,11 +1615,10 @@ randomregraftmixture_<-function(g,add=FALSE,maxtries=100,...){
     }
     ## Which mixture to propose?
     ret= randomnodes(g,internal = T,mix=F, ...)
-    #print(c(rem,ret))
     
     done=isvalidregraftmixture_(g,rem,ret)
     ntries=ntries+1
-    if(ntries==maxtries) stop("Error! Reached maximum number of attempts to find valid tree move!")
+    if(ntries==maxtries) return("no valid mixture regraft pairs")# stop("Error! Reached maximum number of attempts to find valid tree move!")
   }
   # alpha= runif(1,0.01,0.5)
   # w=runif(1,0.01,0.5)
@@ -1502,7 +1701,7 @@ format_params <- function(g, pars){
 }
 
 
-parameterise_<-function(g, pars, what){
+parameterise_<-function(g, pars, mix = NA, what){
   ## Take parameters and put them in their correct place in g
   if(what == "d"){
     if(length(names(pars)) > 0){
@@ -1513,12 +1712,30 @@ parameterise_<-function(g, pars, what){
       }
       
     }else{ warning("Warning: depths have no assigned edge names")
-    nodes = c(g$tips, g$internal)
-    drift = nodes[nodes != g$root]
-    for(j in 1:length(drift))  {g$nl[[ drift[j] ]]$d = pars[j]}}
+      nodes = c(g$tips, g$internal)
+      drift = nodes[nodes != g$root]
+      for(j in 1:length(drift))  {g$nl[[ drift[j] ]]$d = pars[j]}}
   }
   
   if(what == "w"){
+    if(is.na(mix)){
+      for(i in 1:length(pars)){
+        mix = g$mix[i]
+        idx = which(g$nl[[ g$nl[[mix]]$children[2] ]]$parents == mix)
+        g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] = g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] + g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] - pars[i]
+        if(g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] < 0 ) stop("Error: sum of admix weights to admix target exceeds 1")
+        g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] = pars[i]
+      }
+    }else{
+      if(!(mix %in% g$mix)) stop("Invalid mix node")
+      if(length(pars)!=1) stop("Invalid weight parameter")
+      idx = which(g$nl[[ g$nl[[mix]]$children[2] ]]$parents == mix)
+      # print(c(pars[i],g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] + g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx]))
+      g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] = g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] + g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] - pars
+      if(g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] < 0 ) stop("Error: sum of admix weights to admix target exceeds 1")
+      g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] = pars
+    }
+    
     # weights = Map(c,pars,1-pars)
     # print(weights)
     # mix = g$mix
@@ -1528,25 +1745,49 @@ parameterise_<-function(g, pars, what){
     #   g$nl[[ g$nl[[mix[j]]]$children[2] ]]$w = weights[[j]]
     # }
     
-    for(i in 1:length(pars)){
-      mix = g$mix[i]
-      idx = which(g$nl[[ g$nl[[mix]]$children[2] ]]$parents == mix)
-      g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] = g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] + g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] - pars[i]
-      if(g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] < 0 ) stop("Error: sum of admix weights to admix target exceeds 1")
-      g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] = pars[i]
-    }
   }
   return(g)
 }
 
 
 w_loss <- function(w, g0, mix, data){
-  g0 = parameterise_(g0, pars = w, what = "w")
-  p = get_depths(g0, data)
+  g = parameterise_(g0, pars = w, mix = mix, what = "w")
+  p = get_depths(g0, data)  
   g = parameterise_(g0, pars=p, what ="d")
-  loss = ctree_loss2_(g, data)
-  return(loss)
+  loss = ctree_loss_(g, data)
 }
+
+
+w_loss_optim <- function(w, g, data){
+  g = parameterise_(g, pars = w, what = "w")
+  p = get_depths(g, data)  
+  g = parameterise_(g, pars=p, what ="d")
+  #print(w)
+  loss = ctree_loss_(g, data)
+}
+
+
+get_weight_optim <- function(g, data, maxit, factr, pgtol){
+  #if(!(mix %in% g$mix)) stop("Error: mix is not a mixture node")  
+  upper = NULL
+  w = NULL
+  for(mix in g$mix){
+    idx = which(g$nl[[ g$nl[[mix]]$children[2] ]]$parents == mix)
+    mix_w = g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx]
+    upper[length(upper)+1] = g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] - 0.49999 + mix_w
+    w[length(w)+1] = mix_w
+  }
+  #w = runif(n=length(g$mix), 0.05,0.1)#rep(0.1,length(g$mix)) 
+  lower = 0
+  if(0 %in% upper) lower =  1e-10
+  
+  opt = optim(par = w, fn = function(w) w_loss_optim(w, g, data),
+              lower = lower, upper = upper, method = "L-BFGS-B",
+              control = list(maxit=maxit, factr=factr, pgtol=pgtol))
+  
+  return(opt$par)
+}
+
 
 
 golden_section_search <- function(f, lower, upper, tol = 0.1, max_iter = 10) {
@@ -1595,20 +1836,19 @@ golden_section_search <- function(f, lower, upper, tol = 0.1, max_iter = 10) {
 }
 
 
-
-infer_weight <- function(g, mix, data){
+get_weight <- function(g, mix, data){
   if(!(mix %in% g$mix)) stop("Error: mix is not a mixture node")  
-  
   idx = which(g$nl[[ g$nl[[mix]]$children[2] ]]$parents == mix)
-  upper =  g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] - 0.5 + g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx] 
-  w = 0.1 #runif(1,1e-7,upper)
+  mix_w = g$nl[[ g$nl[[mix]]$children[2] ]]$w[idx]
+  upper = g$nl[[ g$nl[[mix]]$children[2] ]]$w[1] - 0.4999 + mix_w
+  w = mix_w
   
   # opt=optimize(f = function(w) w_loss(w, g, mix, data),
   #               maximum = FALSE, 
   #               interval = c(0, upper))
-
-  opt = golden_section_search(f = function(w) w_loss(w, g, mix, data),
-                              lower = 1e-7, upper = upper, tol = 0.1)
+  
+  opt = golden_section_search(f = function(w) w_loss(w, g, mix, data), 
+                              lower = 0, upper = upper, tol = 0.1)
   return(opt)
 }
 
@@ -1639,7 +1879,7 @@ infer_weight <- function(g, mix, data){
 #   alphas <- params[1:length(gref$mix)]
 #   weights <- params[(length(gref$mix)+1):(2*length(gref$mix))]
 #   g = parameterise_mix(gref, alphas, weights)
-#   loss = ctree_loss2_(g, dataref)
+#   loss = ctree_loss_(g, dataref)
 #   return(loss)
 # }
 
@@ -1674,54 +1914,199 @@ transvector <- function(data){
   return(trans)
 }
 
-daginfo <- function(g) {
-  edge = do.call("rbind",
-                 lapply(rev(g$nl[g$internal]), function(n) {
-                   tr = c()
-                   if (any(!is.na(n$children))) tr = cbind(tr, n$id, n$children)
-                   tr
-                 })
-  )
+
+# daginfo <- function(g) {
+#   edge = do.call("rbind",
+#                  lapply(rev(g$nl[g$internal]), function(n) {
+#                    tr = c()
+#                    if (any(!is.na(n$children))) tr = cbind(tr, n$id, n$children)
+#                    tr
+#                  })
+#   )
+#   
+#   colnames(edge) = c("parent", "child")
+#   as.data.frame(edge)
+# }
+
+
+# check_proposal <- function(proposal, graphrecord){
+#   if(is(proposal,"cglist")) proposal = proposal[[1]]
+#   
+#   dag = daginfo(proposal)
+#   if(any(unlist(lapply(graphrecord, function(entry) all(dag == entry))))){
+#     return(list(repeatdag = TRUE, graphrecord = graphrecord))
+#   }
+#   graphrecord[[length(graphrecord) + 1]] = dag
+#   
+#   return(list(repeatdag = FALSE, graphrecord = graphrecord))
+# }
+
+
+enumerate <- function(g){
+  n = length(g$nl)
+  root = g$root
+  node = root
+  visited = c(node,g$tips)
+  enum = c(root,g$tips) 
   
-  colnames(edge) = c("parent", "child")
-  as.data.frame(edge)
+  while(length(enum) < n) {
+    
+    for(c in sort(g$nl[[node]]$children)){ 
+      
+      if(!(c %in% enum)){
+        enum[length(enum) + 1] = c
+        if(c %in% g$tips) visited[length(visited)+1] = c
+      }
+    }
+    
+    for (i in enum) {
+      if(!(i %in% visited)) {
+        node = i
+        visited[length(visited)+1] = i
+        break
+      }
+    }
+  }
+  return(enum)
 }
 
-check_proposal <- function(proposal, graphrecord){
-  dag = daginfo(proposal)
+
+adjacency_matrix <- function(g){
+  n = length(g$nl)
+  adj_matrix = matrix(0, nrow=n, ncol=n)
+  names = enumerate(g)
   
-  if(any(unlist(lapply(graphrecord, function(entry) all(dag == entry))))){
-    return(list(repeatdag = TRUE, graphrecord = graphrecord))
+  for(i in 1:n){
+    for(j in g$nl[[names[i]]]$children){
+      adj_matrix[i, which(names == j)] = 1
+    }
   }
+  
+  rownames(adj_matrix) = names
+  colnames(adj_matrix) = names
+  
+  return(adj_matrix)
+}
+
+
+check_proposal <- function(proposal, graphrecord, lossrecord, current_loss, g) {
+  if (is(proposal, "cglist")) {
+    proposal = proposal[[1]]
+    g = g[[1]]}
+  dag = adjacency_matrix(proposal) 
+  
+  # Check if the proposal has been visited before
+  if (any(unlist(lapply(graphrecord, function(entry) all(dag == entry))))) {
+    
+    # Find the index of the repeated proposal in the graphrecord
+    index = which(unlist(lapply(graphrecord, function(entry) all(dag == entry))))
+    # Compare the current loss with the loss associated with the previously visited proposal
+
+    if (current_loss > lossrecord[index] )  { 
+      # If the current loss is higher, update the loss record and return repeatdag as FALSE
+      
+      if(all(dag == adjacency_matrix(g))){ # If dag is the same as current graph g, return repeatdag as TRUE
+        return(list(repeatdag = TRUE, updatelossrecord = FALSE, graphrecord = graphrecord))
+        
+      }else{ # If dag is a repeat with lower loss but not the same as current graph g, return repeatdag as FALSE
+        return(list(repeatdag = FALSE, updatelossrecord = FALSE, graphrecord = graphrecord))}
+      
+    } else {
+      # If the current loss is lower, return repeatdag as TRUE
+      return(list(repeatdag = TRUE, updatelossrecord = FALSE, graphrecord = graphrecord))
+    }
+  }
+  
+  # If the proposal is not repeated, record its DAG and loss
   graphrecord[[length(graphrecord) + 1]] = dag
   
-  return(list(repeatdag = FALSE, graphrecord = graphrecord))
+  return(list(repeatdag = FALSE, updatelossrecord = TRUE, graphrecord = graphrecord))
 }
 
 
-evaluate_proposal <- function(proposal0, data ,verbose){
-  d = get_depths(proposal0, data)
-  proposal0 = parameterise_(proposal0, pars=d, what = "d")
+## optim implementation
+evaluate_proposal <- function(proposal0, data ,verbose, factr=0.01, pgtol=0.01){
+  if(is(proposal0,"cglist")){
+    ret = lapply(1:length(data), function(i){
+      evaluate_proposal(proposal0[[i]], data[[i]] ,verbose, factr, pgtol)})
+    class(ret) = "cglist"
+    return(ret)
+  }
+  
   if(length(proposal0$mix)>0){
-    w = sapply(proposal0$mix, function(mix) infer_weight(proposal0, mix, data))
+    w = get_weight_optim(proposal0,data, maxit=length(proposal0$mix), factr, pgtol)
     proposal0 = parameterise_(proposal0, pars=w, what = "w")
   }
   d = get_depths(proposal0, data)
   proposal = parameterise_(proposal0, pars=d, what = "d")
-  newloss = ctree_loss2_(proposal,data)
-  return(list(proposal = proposal, loss=newloss))
+  return(proposal)
 }
 
 
-proposal_freqs <- function(freqs){
-  movetype=sample(1:4,1,prob=freqs)
+# evaluate_proposal <- function(g, data ,verbose, max_iter=NA, epsilon = 0.1){
+#   d = get_depths(g, data)
+#   g = parameterise_(g, pars=d, what = "d")
+#   max_iter=length(g$mix)
+#   
+#   if(length(g$mix)>0){
+#     done = FALSE
+#     iter = 0
+#     d0 = d
+#     weights = NULL
+#     weights0 = rep(0.1,length(g$mix))
+#     
+#     while(!done && iter < max_iter){
+#       weights=NULL
+#       for (mix in g$mix){
+#         w = get_weight(g, mix, data)
+#         weights[length(weights)+1] = w
+#         g = parameterise_(g, pars=w,mix=mix, what = "w")
+#         d = get_depths(g, data)
+#         g = parameterise_(g, pars=d, what = "d")
+#       }
+#       del_d = d-d0
+#       del_w = weights-weights0
+# 
+#       d0 = d
+#       weights0 = weights
+#       
+#       if(sum(abs(del_d)) < epsilon ) done = TRUE #&& sum(abs(del_w)) < epsilon
+#       iter = iter + 1
+#     }
+#   }
+#   newloss = ctree_loss_(g,data)
+#   return(list(proposal = g, loss=newloss))
+# }
+
+
+proposal_freqs <- function(g, freqs){
+  if((is(g,"cglist")&&(length(g[[1]]$mix)==0)) ||
+     (is(g,"cg")&&(length(g$mix)==0))){movetype=1 # No mixture edges to worry about
+  }else movetype=sample(1:4,1,prob=freqs)
   return(movetype)
+}
+
+
+mypruneandmixregraft <- function(g, prsource, prtarget, rem, mixsource, mixtarget) {
+  if(is(g,"cglist")){
+    ret=lapply(g,function(x){
+      mypruneandmixregraft(x, prsource, prtarget, rem, mixsource, mixtarget)
+    })
+    class(ret)="cglist"
+    return(ret)
+  }
+  proposal0 = removemixedge_(g,i=rem)
+  proposal0 = mypruneregraft_(proposal0, source = prsource, target = prtarget)
+  proposal=myregraftmixedge_(proposal0, i = NA, 
+                             source = mixsource,
+                             target = mixtarget,
+                             alpha = 0.5,w = runif(1,0.05,0.1))
+ return(proposal) 
 }
 
 
 dagstep2 <- function(g, data, movetype, moveparams,...){
   ## Do one iteration of the graph
-  
   # }else if(movetype==3){
   #   # NNI step
   #   proposal = nn_interchange(g, source = moveparams[1], target = moveparams[2])
@@ -1729,33 +2114,44 @@ dagstep2 <- function(g, data, movetype, moveparams,...){
   if(movetype==1){ 
     # prune/regraft
     proposal = mypruneregraft_(g, source = moveparams[1], target = moveparams[2])
-  }else if(movetype==2 || movetype==4){   
+  }else if(movetype==2 || movetype==4){ 
     # regraft mixture / reverse mixture
-    proposal=myregraftmixedge_(g, i = moveparams[3], 
+    proposal = myregraftmixedge_(g, i = moveparams[3], 
                                source = moveparams[1],
                                target = moveparams[2],
-                               alpha = runif(1,0,0.5),w = 0.04) #w = runif(1,0.005, 0.5))
-  }else if(movetype==3){
+                               alpha = 0.5,w = runif(1,0.05,0.1)) #w = runif(1,0.005, 0.5))
+  }else if(movetype==3){ 
+    proposal = mypruneandmixregraft(g, prsource=moveparams[1],
+                                    prtarget=moveparams[2], rem=moveparams[3],
+                                    mixsource=moveparams[4], mixtarget=moveparams[5])
     # prune/regraft and mixture regraft
-    proposal0 = removemixedge_(g,i=moveparams[3])
-    proposal0 = mypruneregraft_(proposal0, source = moveparams[1], target = moveparams[2])
-    proposal=myregraftmixedge_(proposal0, i = NA, 
-                               source = moveparams[4],
-                               target = moveparams[5],
-                               alpha = runif(1,0,0.5),w = 0.04) #w = runif(1,0.005, 0.5))  
+    # proposal0 = removemixedge_(g,i=moveparams[3])
+    # proposal0 = mypruneregraft_(proposal0, source = moveparams[1], target = moveparams[2])
+    # proposal=myregraftmixedge_(proposal0, i = NA, 
+    #                            source = moveparams[4],
+    #                            target = moveparams[5],
+    #                            alpha = runif(1,0,0.5),w = 0.04) #w = runif(1,0.005, 0.5))
+  #   
+  # }else if(movetype==5){
+  #   # NNI
+  #   proposal = nn_interchange(g,source = moveparams[1],target=moveparams[2])
+    
   }else {print(movetype)
     stop("Invalid move type in dagstep?!")
-    }
+  }
   proposal
 }
 
 
-get_moveparams <- function(g,movetype, verbose=TRUE){
+get_moveparams <- function(g, movetype, verbose=TRUE){
+  if(is(g,"cglist")) return(get_moveparams(g[[1]], movetype, verbose))
+  
   moveparams=NA
 
   if(movetype == 1){
     # prune and regraft
     ret = randomregraftpair_(g)
+    if(length(ret)== 1) return("no valid parameters")
     moveparams[1] = ret[1]
     moveparams[2] = ret[2]
     moveparams[3:5] = NA
@@ -1766,10 +2162,11 @@ get_moveparams <- function(g,movetype, verbose=TRUE){
     }
     
   }else if(movetype == 2){
-    # regraft mixture 
+    # mixture regraft
     #ppairs = posmixturepairs(g,data)
     #ret =  ppairs[[sample(1:length(ppairs), 1)]] #randomregraftmixture_(g) #residual_mixpairs(g,ppairs)
     ret = randomregraftmixture_(g)
+    if(length(ret)== 1) return("no valid parameters")
     moveparams[1] = ret$source
     moveparams[2] = ret$target
     moveparams[3] = ret$rem
@@ -1782,12 +2179,12 @@ get_moveparams <- function(g,movetype, verbose=TRUE){
   }else if(movetype == 3){
     # prune/regraft and mix regraft
     ret = randomprunemixpars(g)
+    if(length(ret)== 1) return("no valid parameters")
     moveparams[1] = ret$prsource
     moveparams[2] = ret$prtarget
     moveparams[3] = ret$rem    
     moveparams[4] = ret$mixsource
     moveparams[5] = ret$mixtarget
-
     if(verbose){
       print(paste("proposal: movetype"," prune/regraft and mix regraft",
                   "swap:",paste(moveparams[1], moveparams[2],collapse=","),
@@ -1801,285 +2198,479 @@ get_moveparams <- function(g,movetype, verbose=TRUE){
       }else rem=sample(g$mix,1)
     
     ret = c(g$nl[[rem]]$children[2], g$nl[[rem]]$children[1])
-    
-    moveparams[1] = ret[1]
-    moveparams[2] = ret[2]
-    moveparams[3] = rem
-    moveparams[4:5] = NA
-    if(verbose){
-      print(paste("proposal: movetype","reverse mixture",
-                  "swap:",paste(moveparams[1], moveparams[2],collapse=","),
-                  "mixnode:",moveparams[3]))
+    if(isvalidregraftmixture_(g,rem,ret)){
+      moveparams[1] = ret[1]
+      moveparams[2] = ret[2]
+      moveparams[3] = rem
+      moveparams[4:5] = NA
+      if(verbose){
+        print(paste("proposal: movetype:","reverse mixture",
+                    "swap:",paste(moveparams[1], moveparams[2],collapse=","),
+                    "mixnode:",moveparams[3]))
+      }
+    }else{
+      #print("no valid parameters")
+      return("no valid parameters")
     }
   }
-  # }else if(movetype == 3){
+  # }else if(movetype == 5){
   #   # NNI
   #   ret = randomNNIpair(g)
   #   moveparams[1] = ret[1]
   #   moveparams[2] = ret[2]
   #   moveparams[3] = NA
   #   if(verbose){
-  #     print(paste("proposal: movetype",movetype,
+  #     print(paste("proposal: movetype","NNI",
   #                 "swap:",paste(moveparams[1], moveparams[2],collapse=","),
   #                 "mixnode:",NA))
   #   }
-  # }
+  
   return(moveparams)
 }
 
+check_moveparams <- function(g, movetype, moveparams, movefreqs, verbose=TRUE){
+  if(is(g,"cglist")) return(check_moveparams(g[[1]], movetype, moveparams, movefreqs, verbose))
+  
+  if(length(moveparams)==1){
+    maxtries = 0
+    done = FALSE
+    while (!done) {
+      #if(maxtries == 5) stop("no moves")
+      tfreqs = movefreqs
+      movetype = proposal_freqs(g,tfreqs)
+      moveparams = get_moveparams(g=g, movetype = movetype, verbose)
+      done = length(moveparams)>1
+      maxtries = maxtries + 1
+      if(maxtries == 100){
+        print("no valid moves")
+        return("no valid moves")
+      } 
+    }
+  }
+  return(c(movetype, moveparams))
+}
 
-infer_graph <- function(g, data,maxiter=100, movefreqs, verbose = FALSE, plotprogress = FALSE,losstol = 1e-6){
 
-  loss = ctree_loss2_(g,data)
+infer_graph <- function(g, data, maxiter=100, movefreqs=c(1/4,1/4,1/4,1/4), verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = 0) { # initial_temp = 1, cooling_rate = 0.99 
+  loss = ctree_loss_(g,data)
+  min_loss = loss
+  min_g = g
   losses=rep(NA,maxiter)
   losses[1]=loss
+  moverecord = NULL
   graphrecord = list()
+  lossrecord = NULL
+  #temperature <- initial_temp
   
   if(maxiter>1) for(i in 2:maxiter){
-    movetype = proposal_freqs(movefreqs)
+    movetype = proposal_freqs(g,movefreqs)
     moveparams = get_moveparams(g=g,movetype =movetype, verbose)
-
+    moves = check_moveparams(g=g,movetype=movetype, moveparams=moveparams, 
+                             movefreqs=movefreqs,verbose = TRUE)
+    if(length(moves)==1) break
+    movetype = moves[1]
+    moveparams = moves[2:6]
+    if(length(moverecord)>0) {
+      maxtries = 0
+      while(any(duplicated(rbind(moverecord, moves, deparse.level = 0)))){
+        # avoid repeat moves
+        if(maxtries==400 || length(moves)==1) {
+          print(paste("Converged with loss:",min_loss,"at iteration",i,collapse=","))
+          return(list(g = min_g, loss = min_loss, loss_list = losses))
+        }
+        print("Repeat move, finding new moves...")
+        movetype = proposal_freqs(g,movefreqs)
+        moveparams = get_moveparams(g=g,movetype = movetype, verbose=TRUE)
+        moves = check_moveparams(g=g,movetype=movetype, moveparams=moveparams,
+                                 movefreqs=movefreqs,verbose = TRUE)
+        if(length(moves)==1) next
+        movetype = moves[1]
+        moveparams = moves[2:6]
+        maxtries = maxtries + 1
+      }
+    }
+    
+    moverecord = rbind(moverecord, moves,deparse.level = 0)
+    
     proposal0 = dagstep2(g, data, movetype=movetype, moveparams=moveparams, verbose = verbose)
     
     ## avoids repeat topologies being tested
-    check = check_proposal(proposal0, graphrecord)
+    check = check_proposal(proposal0, graphrecord, lossrecord , current_loss = loss, g)
     if(check$repeatdag) {
       print("Repeat topology, finding new moves...")
       i = i+1
       next
-    }
+    }    
+    proposal = evaluate_proposal(proposal0, data, verbose, factr = 0.01, pgtol = 0.01)
+    newloss = ctree_loss_(proposal,data)
+
     graphrecord = check$graphrecord # update graph record
     
-    P = evaluate_proposal(proposal0, data, verbose )
-    proposal = P$proposal
-    newloss = P$loss
+    if(check$updatelossrecord) lossrecord[length(lossrecord)+1] = newloss
     
-   if (newloss < loss){
-     print(paste("Iteration:", i," current loss:", newloss,collapse=","))
-     g = proposal
-     loss = newloss
-     # moverecord = NULL
-     # validmovescount = sum(c(validRegraftPairs(g)$count,2*validMixturePairs(g)$count, 2*validNNIPairs(g)$count)[movefreqs>0])
-     if(plotprogress) plot.cg_(g)
-   }
-   losses[i]=loss
-   if(loss<losstol){
-     print(paste("Converged with loss:",loss,"at iteration",i,collapse=","))
-     return(list(g = g, loss = loss, loss_list = losses))
-   }
+    
+    if(length(graphrecord) !=length(lossrecord)) stop("Bug: loss record doesn't match graph record")
+    
+    if (newloss < loss ||(runif(1,min=0,max=MHtol) >  (newloss - loss)/loss ) ){ # runif(1) < exp((loss - newloss) / temperature) 
+      print(paste("Iteration:", i," current loss:", newloss,collapse=","))
+      g = proposal
+      loss = newloss
+      moverecord = NULL
+      if(plotprogress){
+        if(is(g,"cglist")){
+          par(mfrow=c(1,2))
+          lapply(g,plot.cg_)
+        }else plot.cg_(g)
+      }
+    }
+    if(newloss < min_loss){
+      min_loss = newloss
+      min_g = g
+    }
+    losses[i]=loss
+    if(loss<losstol){
+      print(paste("Converged with loss:",min_loss,"at iteration",i,collapse=","))
+      return(list(g = min_g, loss = min_loss, loss_list = losses))
+    }
+    # Decrease temperature
+    #temperature <- temperature * cooling_rate
   }
-  print(paste("Finished with loss:", loss,collapse=","))  
-  return(list(g = g, loss = loss, loss_list = losses))
+  print(paste("Finished with loss:", min_loss,collapse=","))  
+  return(list(g = min_g, loss = min_loss, loss_list = losses))
 }
+
+
+add_mixedges <- function(g, n_edges, swap= NULL, weights = NULL, randomlistweights = FALSE){
+  ## randomly adds mixture edges to graph
+  ## weights can be assigned or generated manually for graphs and cglists
+  ## To assign weights manually to cglist, weights must be a list e.g. weights = list(c(0.1,0.2),c(0.3,0.4)) 
+  #if(length(weights)>0 && length(weights)!= n_edges) stop("Error: Dimension of weights not equal to n_edges")
+  randswap = FALSE
+  if(length(swap)==0) randswap = TRUE
+  
+  
+  for (i in 1:n_edges) {
+    
+    if(is(weights,"list")) {
+      
+        w = weights[[i]] # assign weights manually 
+        
+    }else if(is(weights,"vector")) {
+      
+      w = weights[i] # assign weights manually 
+      
+    } else w = runif(1,0.1,0.45)  # else generate random weights 
+    
+    alpha = 0.5 #runif(1,0.05,0.95)
+    
+    if(is(g,"cglist")) {
+      if(randswap) swap = randomregraftmixture_(g[[1]],add = TRUE)
+      
+      for (i in seq_along(g)) {
+        
+        if(is(weights,"list")) {weight = w[i]
+        } else weight = w
+        
+        if (randomlistweights) weight = runif(1,0.1,0.45) 
+        
+        g[[i]] = mixedge_(g[[i]], source = swap$source, target = swap$target, alpha = alpha, w = weight)
+      }
+                 
+      class(g) = "cglist"
+    } else {
+        if(randswap) swap = randomregraftmixture_(g,add = TRUE)
+        g = mixedge_(g,source = swap$source, target = swap$target, alpha = alpha, w = w)
+      }
+  }
+  return(g)  
+}
+
+
+
+reparameterise<-function(g){
+  ## For a given topology, resimulate drift parameters under the coalescent
+  alive = g$tips
+  n = length(alive)
+  time = 0
+  
+  for(i in n:2){
+    
+    parents = NULL
+    for(i in alive) {
+      parents[length(parents)+1] = g$nl[[i]]$parents
+    }
+    duplicates = parents[duplicated(parents)]
+    
+    if(length(duplicates)>1) {coalesced = sample(duplicates,1)
+    } else coalesced = duplicates
+    
+    clist <- g$nl[[coalesced]]$children
+    
+    t=rexp(1,i)
+    
+    time=time+t
+    
+    g$nl[[coalesced]]$t = time
+    
+    for(c in 1:2){
+      g$nl[[clist[c] ]]$d = time-g$nl[[clist[c] ]]$t 
+    }
+    #if(done == TRUE) break
+    alive=c(alive[!alive%in%clist],coalesced)
+  }
+  return(g)
+}  
+
+
+
+################################################################################
+
+
+
+## Testing ##
+
+
+check_topology <- function(g, gtrue){
+  if(is(g,"cglist")) {
+    g = g[[1]]
+  }
+  # Check if the correct topology has been inferred
+  if(all(adjacency_matrix(g) ==  adjacency_matrix(gtrue)) == TRUE){
+    print("True topology inferred!")
+    return(TRUE)
+  } else{
+    print("True topology not inferred")
+    return(FALSE)
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 #######################
 
-
-nn_interchange <- function(g, source, target){
-  # swaps sub-trees "rooted" at source and target nodes 
-  
-  snode = g$nl[[source]]
-  tnode = g$nl[[target]]
-
-  ptarget=g$nl[[target]]$parents[1] 
-  psource=g$nl[[source]]$parents[1]
-  #if(source %in% g$internal && source %in% g$internal){
-    g$nl[[psource]]$children[g$nl[[psource]]$children == source] = target
-    g$nl[[ptarget]]$children[g$nl[[ptarget]]$children == target] = source  
-  #}
-  g$nl[[source]]$parents[1] = ptarget
-  g$nl[[target]]$parents[1] = psource  
-
-  return(g)
-}
-
-
-isvalidNNIpair <- function(g, swap){
-  ## Asks: is swap[1] <-> swap[2] a valid nearest neighbours interchange pair?
-  done = TRUE
-  ## Reject if:
-  ## either node is a root 
-  if(any(swap == g$root)) return(done = FALSE)  
-  
-  ## nodes are the same
-  if(swap[1] == swap[2]) done = FALSE
-  
-  ## either node is a tip
-  if(any(swap %in% g$tips) && !all(swap %in% g$tips)) done = FALSE 
-  
-  ## either node is an outgroup
-  if(length(g$outgroup)>0){
-    tog=which(g$tip.label==g$outgroup)
-    if(any(swap %in%tog)) done=FALSE
-  }
-  
-  ## nodes are siblings
-  if(g$nl[[swap[1]]]$parents[1] == g$nl[[swap[2]]]$parents[1]) done = FALSE
-  
-  ## The target is a descendent of the source
-  if(swap[2] %in% nodesunder_(g,swap[[1]])) done=FALSE 
-  
-  ## The source is a descendent of the target
-  if(swap[1] %in% nodesunder_(g,swap[[2]])) done=FALSE
-  
- return(done) 
-}
-
-
-randomNNIpair<-function(g,maxtries=400,...){
-  ## Return random nodes that are not siblings
-  ## Careful not to go crazy if there are no valid options...
-  done=FALSE
-  ntries=0
-  while(!done){
-    #        print(paste("... random prune pair try",ntries)) ## DEBUG
-    ret=randomnodes(g,...)
-    #        print(paste(ret,collapse=",")) ## DEBUG
-    for(i in 1:length(ret)) {
-      while(TRUE){
-        ii=ret[i]
-        n=g$nl[[ii]]
-        targetsparentismixture = (!is.na(n$parents[1])) && (g$nl[[n$parents[1]]]$type=="mixture")
-        if(targetsparentismixture) ret[i]=n$parents[1]
-        else break;
-      }
-    }
-    done=isvalidNNIpair(g,ret)
-    ntries=ntries+1
-    
-    if(ntries==maxtries) return(NA) #stop("Error! Reached maximum number of attempts to find valid tree move!")
-  }
-  return(ret)
-}
-
-
-myNNIstep<-function(g){
-  ## Do a complete nearest neighbours interchange step
-  if(is(g,"cglist")){
-    swap=randomNNIpair(g[[1]])
-    if(is.na(swap)) return(list(g=g,swap=swap,mixswap=NA))
-    gtest=lapply(g,function(x)nn_interchange(x,swap[1],swap[2]))
-    class(gtest)="cglist"
-  }else{
-    swap=randomNNIpair(g)
-    gtest=nn_interchange(g,swap[1],swap[2])
-  }
-  #print(swap)
-  list(g=gtest,swap=swap,mixswap=NA)
-}
-
-
-countNNIValidPairs <- function(g) {
-  validPairs <- 0
-  for (i in 1:(length(g$nl) - 1)) {
-    for (j in (i + 1):length(g$nl)) {
-  
-      swap <- c(i, j)
-      if (isvalidNNIpair(g, swap)) {
-        validPairs <- validPairs + 1
-      }
-    }
-  }
-  return(validPairs)
-}
-
-
-validRegraftPairs <- function(g) {
-  validPairs <- 0
-  swaplist = list()
-  for (i in 1:(length(g$nl) - 1)) {
-    for (j in (i + 1):length(g$nl)) {
-      swap <- c(i, j)
-      if (isvalidregraftpair_(g, swap)) {
-        validPairs <- validPairs + 1
-        swaplist[[validPairs]] = swap
-      }
-    }
-  }
-  return(list(count = validPairs, swaplist = swaplist))
-}
-
-
-validMixturePairs<- function(g) {
-  validPairs <- 0
-  mixswaplist = list()
-  # mix = g$mix
-  # for(i in 1:length(mix)){   
-  #   g = removemixedge_(g, i = mix[i]) 
-  # }
-  for (i in (length(g$nl)):2) {
-    for (j in (i - 1):1) {
-      mixswap <- c(i, j)
-      if (isvalidregraftmixture_(g, rem=NA, mixswap)) {
-        validPairs <- validPairs + 1
-        mixswaplist[[validPairs]] = mixswap
-      }
-    }
-  }
-  return(list(count = validPairs, mixswaplist = mixswaplist))
-}
-
-validNNIPairs <- function(g) {
-  validPairs <- 0
-  swaplist = list()
-  for (i in 1:(length(g$nl) - 1)) {
-    for (j in (i + 1):length(g$nl)) {
-      swap <- c(i, j)
-      if (isvalidNNIpair(g, swap)) {
-        validPairs <- validPairs + 1
-        swaplist[[validPairs]] = swap
-      }
-    }
-  }
-  return(list(count = validPairs, swaplist = swaplist))
-}
-
-
-
-posmixturepairs <-function(g,data){
-  res = data - ccov_dag_(g)
-  #positive_indices <- which(res > 0, arr.ind = TRUE)
-  nodelist = NULL
-  diagres = abs(diag(res))
-  posvars = diagres/sum(diagres)!=0
-  posvars
-  tips = which(posvars) # unique(as.vector(positive_indices))
-  
-  for (t in tips) {
-    nodelist = c(nodelist,nodesabove(g,t))
-  }
-  freq = table(nodelist)
-  nodes = nodelist[!nodelist %in% names(freq[freq == length(tips)])]
-  ppairs = unique(nodes)
-  return(ppairs)
-}
+## Unused code ##
+# 
+# nn_interchange <- function(g, source, target){
+#   # swaps sub-trees "rooted" at source and target nodes 
+#   
+#   snode = g$nl[[source]]
+#   tnode = g$nl[[target]]
+# 
+#   ptarget=g$nl[[target]]$parents[1] 
+#   psource=g$nl[[source]]$parents[1]
+#   #if(source %in% g$internal && source %in% g$internal){
+#     g$nl[[psource]]$children[g$nl[[psource]]$children == source] = target
+#     g$nl[[ptarget]]$children[g$nl[[ptarget]]$children == target] = source  
+#   #}
+#   g$nl[[source]]$parents[1] = ptarget
+#   g$nl[[target]]$parents[1] = psource  
+# 
+#   return(g)
+# }
+# 
+# 
+# ## NN_INTERCHANGE BUG: SWAP NODE WITH ADMIX ON IT, NEEDS TO TAKE ADMIX NODE WITH IT
+# isvalidNNIpair <- function(g, swap){
+#   ## Asks: is swap[1] <-> swap[2] a valid nearest neighbours interchange pair?
+#   done = TRUE
+#   ## Reject if:
+#   ## either node is a root 
+#   if(any(swap == g$root)) return(done = FALSE)  
+#   
+#   ## nodes are the same
+#   if(swap[1] == swap[2]) done = FALSE
+#   
+#   ## either node is a tip
+#   if(any(swap %in% g$tips) && !all(swap %in% g$tips)) done = FALSE 
+#   
+#   ## either node is an outgroup
+#   if(length(g$outgroup)>0){
+#     tog=which(g$tip.label==g$outgroup)
+#     if(any(swap %in%tog)) done=FALSE
+#   }
+#   
+#   ## nodes are siblings
+#   if(g$nl[[swap[1]]]$parents[1] == g$nl[[swap[2]]]$parents[1]) done = FALSE
+#   
+#   ## The target is a descendent of the source
+#   if(swap[2] %in% nodesunder_(g,swap[[1]])) done=FALSE 
+#   
+#   ## The source is a descendent of the target
+#   if(swap[1] %in% nodesunder_(g,swap[[2]])) done=FALSE
+#   
+#  return(done) 
+# }
+# 
+# 
+# randomNNIpair<-function(g,maxtries=400,...){
+#   ## Return random nodes that are not siblings
+#   ## Careful not to go crazy if there are no valid options...
+#   done=FALSE
+#   ntries=0
+#   while(!done){
+#     #        print(paste("... random prune pair try",ntries)) ## DEBUG
+#     ret=randomnodes(g,...)
+#     #        print(paste(ret,collapse=",")) ## DEBUG
+#     for(i in 1:length(ret)) {
+#       while(TRUE){
+#         ii=ret[i]
+#         n=g$nl[[ii]]
+#         targetsparentismixture = (!is.na(n$parents[1])) && (g$nl[[n$parents[1]]]$type=="mixture")
+#         if(targetsparentismixture) ret[i]=n$parents[1]
+#         else break;
+#       }
+#     }
+#     done=isvalidNNIpair(g,ret)
+#     ntries=ntries+1
+#     
+#     if(ntries==maxtries) return(4) #stop("Error! Reached maximum number of attempts to find valid tree move!")
+#   }
+#   return(ret)
+# }
+# 
+# 
+# myNNIstep<-function(g){
+#   ## Do a complete nearest neighbours interchange step
+#   if(is(g,"cglist")){
+#     swap=randomNNIpair(g[[1]])
+#     if(is.na(swap)) return(list(g=g,swap=swap,mixswap=NA))
+#     gtest=lapply(g,function(x)nn_interchange(x,swap[1],swap[2]))
+#     class(gtest)="cglist"
+#   }else{
+#     swap=randomNNIpair(g)
+#     gtest=nn_interchange(g,swap[1],swap[2])
+#   }
+#   #print(swap)
+#   list(g=gtest,swap=swap,mixswap=NA)
+# }
+# 
+# 
+# countNNIValidPairs <- function(g) {
+#   validPairs <- 0
+#   for (i in 1:(length(g$nl) - 1)) {
+#     for (j in (i + 1):length(g$nl)) {
+#   
+#       swap <- c(i, j)
+#       if (isvalidNNIpair(g, swap)) {
+#         validPairs <- validPairs + 1
+#       }
+#     }
+#   }
+#   return(validPairs)
+# }
+# 
+# 
+# validRegraftPairs <- function(g) {
+#   validPairs <- 0
+#   swaplist = list()
+#   for (i in 1:(length(g$nl) - 1)) {
+#     for (j in (i + 1):length(g$nl)) {
+#       swap <- c(i, j)
+#       if (isvalidregraftpair_(g, swap)) {
+#         validPairs <- validPairs + 1
+#         swaplist[[validPairs]] = swap
+#       }
+#     }
+#   }
+#   return(list(count = validPairs, swaplist = swaplist))
+# }
+# 
+# 
+# validMixturePairs<- function(g) {
+#   validPairs <- 0
+#   mixswaplist = list()
+#   # mix = g$mix
+#   # for(i in 1:length(mix)){   
+#   #   g = removemixedge_(g, i = mix[i]) 
+#   # }
+#   for (i in (length(g$nl)):2) {
+#     for (j in (i - 1):1) {
+#       mixswap <- c(i, j)
+#       if (isvalidregraftmixture_(g, rem=NA, mixswap)) {
+#         validPairs <- validPairs + 1
+#         mixswaplist[[validPairs]] = mixswap
+#       }
+#     }
+#   }
+#   return(list(count = validPairs, mixswaplist = mixswaplist))
+# }
+# 
+# validNNIPairs <- function(g) {
+#   validPairs <- 0
+#   swaplist = list()
+#   for (i in 1:(length(g$nl) - 1)) {
+#     for (j in (i + 1):length(g$nl)) {
+#       swap <- c(i, j)
+#       if (isvalidNNIpair(g, swap)) {
+#         validPairs <- validPairs + 1
+#         swaplist[[validPairs]] = swap
+#       }
+#     }
+#   }
+#   return(list(count = validPairs, swaplist = swaplist))
+# }
+# 
 
 
-residual_mixpairs <- function(g,ppairs,add=FALSE,maxtries=200,...){
-  ntries=0
-  done=FALSE
-  while(!done){
-    if(add){
-      rem=NA
-    }else{
-      ## Which node to remove?
-      if(length(g$mix)==1) rem=g$mix
-      else rem=sample(g$mix,1)
-    }
-    ## Which mixture to propose?
-    ret= sample(ppairs,2,replace = FALSE)
-    done=isvalidregraftmixture_(g,rem,ret)
-    ntries=ntries+1
-    
-    if(ntries==maxtries) stop("Error! Reached maximum number of attempts to find valid tree move!")
-  }
-  alpha= runif(1,0.01,0.5)
-  w=runif(1,0.01,0.5)
-  ret=list(rem=rem,source=ret[1],target=ret[2],alpha=alpha,w=w)
-  return(ret)
-}
+# posmixturepairs <-function(g,data){
+#   res = data - ccov_dag_(g)
+#   #positive_indices <- which(res > 0, arr.ind = TRUE)
+#   nodelist = NULL
+#   diagres = abs(diag(res))
+#   posvars = diagres/sum(diagres)!=0
+#   posvars
+#   tips = which(posvars) # unique(as.vector(positive_indices))
+#   
+#   for (t in tips) {
+#     nodelist = c(nodelist,nodesabove(g,t))
+#   }
+#   freq = table(nodelist)
+#   nodes = nodelist[!nodelist %in% names(freq[freq == length(tips)])]
+#   ppairs = unique(nodes)
+#   return(ppairs)
+# }
+
+
+# residual_mixpairs <- function(g,ppairs,add=FALSE,maxtries=200,...){
+#   ntries=0
+#   done=FALSE
+#   while(!done){
+#     if(add){
+#       rem=NA
+#     }else{
+#       ## Which node to remove?
+#       if(length(g$mix)==1) rem=g$mix
+#       else rem=sample(g$mix,1)
+#     }
+#     ## Which mixture to propose?
+#     ret= sample(ppairs,2,replace = FALSE)
+#     done=isvalidregraftmixture_(g,rem,ret)
+#     ntries=ntries+1
+#     
+#     if(ntries==maxtries) stop("Error! Reached maximum number of attempts to find valid tree move!")
+#   }
+#   alpha= runif(1,0.01,0.5)
+#   w=runif(1,0.01,0.5)
+#   ret=list(rem=rem,source=ret[1],target=ret[2],alpha=alpha,w=w)
+#   return(ret)
+# }
 
 
 
@@ -2180,7 +2771,7 @@ residual_mixpairs <- function(g,ppairs,add=FALSE,maxtries=200,...){
 # infer_graph <- function(g, data,maxiter=100, movefreqs, verbose = FALSE, losstol = 0.001){
 #   #trans = transvector(data)
 #   #data = trans*data
-#   loss = ctree_loss2_(g,data)
+#   loss = ctree_loss_(g,data)
 #   losses=rep(NA,maxiter)
 #   losses[1]=loss
 #   
