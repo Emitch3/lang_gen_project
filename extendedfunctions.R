@@ -2340,7 +2340,7 @@ infer_graph <- function(g, data, maxiter=100, movefreqs=c(1/4,1/4,1/4,1/4), verb
 }
 
 
-add_mixedges <- function(g, n_edges, swap= NULL, weights = NULL, randomlistweights = FALSE){
+add_mixedges <- function(g, n_edges, swap= NULL, weights = NULL, randomlistweights = TRUE){
   ## randomly adds mixture edges to graph
   ## weights can be assigned or generated manually for graphs and cglists
   ## To assign weights manually to cglist, weights must be a list e.g. weights = list(c(0.1,0.2),c(0.3,0.4)) 
