@@ -2328,7 +2328,7 @@ infer_graph <- function(g, data, maxiter=100, movefreqs=c(1/4,1/4,1/4,1/4), verb
       min_g = g
     }
     losses[i]=loss
-    if(loss<losstol){
+    if(loss<=losstol){
       print(paste("Converged with loss:",min_loss,"at iteration",i,collapse=","))
       return(list(g = min_g, loss = min_loss, loss_list = losses))
     }
@@ -2361,7 +2361,7 @@ add_mixedges <- function(g, n_edges, swap= NULL, weights = NULL, randomlistweigh
       
     } else w = runif(1,0.1,0.45)  # else generate random weights 
     
-    alpha = 0.5 #runif(1,0.05,0.95)
+    alpha = runif(1,0.05,0.95)
     
     if(is(g,"cglist")) {
       if(randswap) swap = randomregraftmixture_(g[[1]],add = TRUE)
