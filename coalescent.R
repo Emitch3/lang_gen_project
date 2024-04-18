@@ -13,14 +13,10 @@ source("extendedfunctions.R")
                         ####################
 
 
-## Problems with add_mixedges function ???
-
-# Systematically add admix edges
---------------------------------------------------------------------------------
 
 ordermatrix<-function(x,order){
-  ## Reorder a matrix x ro the order given
-  ## For plotting
+  #Reorder a matrix x ro the order given
+  #For plotting
   x=x[rownames(x)%in%order,colnames(x)%in%order]
   mat=matrix(NA,nrow=length(order),ncol=length(order))
   rownames(mat)=colnames(mat)=order
@@ -105,6 +101,15 @@ plot.new()
 tinf1=infer_graph(trandlist, dataref, maxiter = 200, movefreqs = c(1/4,1/4,1/4,1/4), 
                   verbose = T, plotprogress = T, losstol = 1e-10, MHtol = 0)  # initial_temp = 1,cooling_rate = 0.99
 
+
+pt=plot.cg_(tinf1$g[[1]],show = FALSE)
+tpred1=ccov_dag_(tinf1$g)
+
+Clarity_Chart(ordermatrix(tpred1[[2]],pt$order),scalefun=myscalefun2,text=T,main="Observed 1")
+
+
+            
+            
 
 check_topology(g=tinf1$g, gtrue = cglist1[[1]])
 

@@ -1291,6 +1291,16 @@ get_nonmixparent <-function(g,i){
   return(node)
 }
 
+get_nonmixchildren <-function(g,i){
+  done=FALSE
+  mix = g$mix
+  node = g$nl[[i]]$children[1]
+  while (!done) {
+    if(!(node %in% mix)){ done = TRUE
+    } else node = g$nl[[node]]$children[1]
+  }
+  return(node)
+}
 
 get_mixparents <- function(g,i){
   done=FALSE
@@ -1404,11 +1414,15 @@ mypruneregraftstep_<-function(g){
 }
 
 
-ctree_loss2_<-function(gref,dataref, lambda=0){
+ctree_loss2_<-function(gref,dataref,stderr=NULL, lambda=0){
   ## Evaluate the loss for a parameterised graph of class cg, NOT a cglist
+  if(is.null(stderr)){
+    len = nrow(dataref)
+    stderr = matrix(1,nrow=len,ncol=len)
+  }
   pred<-ccov_dag_(gref)
   dataref=dataref[gref$tip.label,gref$tip.label]
-  loss<-sum(na.omit(as.numeric((pred-dataref)^2)))
+  loss<-sum(na.omit(as.numeric((pred-dataref)^2))/stderr)
   # penalisation term for the diagonals
   #d = diag(pred)
   # penalty <- lambda * sum((d-mean(d))^2)
@@ -1429,7 +1443,7 @@ ctree_loss_<-function(gref,dataref){
     })
     loss = Reduce("+",losslist)
   }else{
-    loss = ctree_loss2_(gref,dataref,center)
+    loss = ctree_loss2_(gref,dataref)#,center
   }
   loss
 }
@@ -2251,7 +2265,8 @@ check_moveparams <- function(g, movetype, moveparams, movefreqs, verbose=TRUE){
 }
 
 
-infer_graph <- function(g, data, maxiter=100, movefreqs=c(1/4,1/4,1/4,1/4), verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = 0) { # initial_temp = 1, cooling_rate = 0.99 
+infer_graph <- function(g, data, maxiter=100, movefreqs=c(1/4,1/4,1/4,1/4), 
+                        verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = 0) { 
   loss = ctree_loss_(g,data)
   min_loss = loss
   min_g = g
@@ -2427,7 +2442,7 @@ reparameterise<-function(g){
 
 
 
-## Testing ##
+## Simulation functions ##
 
 
 check_topology <- function(g, gtrue){
@@ -2446,15 +2461,211 @@ check_topology <- function(g, gtrue){
 
 
 
+prediction_errors <- function(results) {
+  n_trials = length(results)
+  
+  # res_joint_error1 <- numeric(n_trials)
+  res_joint_error <- numeric(n_trials)
+  res_single_error1 <- numeric(n_trials)
+  res_single_error2 <- numeric(n_trials)
+  
+  for (i in 1:n_trials) {
+    tdata1 <- results[[i]]$true_record$truedata1 
+    tdata2 <- results[[i]]$true_record$truedata2
+    tdataref <- list(tdata1, tdata2)
+    
+    simjointg1 <- results[[i]]$sim_joint_results$g1
+    simjointg2 <- results[[i]]$sim_joint_results$g2
+    
+    simjointglist <- list(simjointg1, simjointg2)
+    class(simjointglist) <- "cglist"    
+    
+    simg1 <- results[[i]]$sim_data1_results$g
+    simg2 <- results[[i]]$sim_data2_results$g
+    
+    simglist <- list(simg1, simg2)
+    class(simglist) <- "cglist"
+    
+    para_simjointg <- evaluate_proposal(simjointglist, tdataref)
+    
+    para_simg1 <- evaluate_proposal(simg1, tdata1)
+    para_simg2 <- evaluate_proposal(simg2, tdata2)
+    
+    res_joint_error1[i] <- ctree_loss_(para_simjointg[[1]], dataref = tdata1)
+    res_joint_error2[i] <- ctree_loss_(para_simjointg[[2]], dataref = tdata2)
+    res_single_error1[i] <- ctree_loss_(para_simg1, dataref = tdata1)
+    res_single_error2[i] <- ctree_loss_(para_simg2, dataref = tdata2)
+  }
+  
+  return(list(res_joint_error1 = res_joint_error1, res_joint_error2 = res_joint_error2,
+              res_single_error1 = res_single_error1, res_single_error2 = res_single_error2))
+}
+
+
+
+outofsample_errors <- function(results) {
+  n_trials = length(results)
+  res_joint_error <- numeric(n_trials)
+  res_single_error1 <- numeric(n_trials)
+  res_single_error2 <- numeric(n_trials)
+  
+  for (i in 1:n_trials) {
+    # get true topology
+    g = results[[i]]$true_record$g1
+    # Reparameterise graph parameters of g
+    srctgt = list()
+    for(j in g$mix) {
+      if(g$nl[[j]]$children[1] %in% g$mix) {
+        srctgt[[length(srctgt)+1]] = c( get_nonmixchildren(g,g$nl[[j]]$children[1]), g$nl[[j]]$children[2])
+      }
+      else{
+        srctgt[[length(srctgt)+1]] = c( g$nl[[j]]$children[1], g$nl[[j]]$children[2])
+      }
+      g = removemixedge_(g=g,i=j)
+      g$spare = numeric(0)
+    }
+    g = reparameterise(g)
+    for(k in 1:length(srctgt)){
+      g = mixedge_(g = g, source = srctgt[[k]][1],
+                   target =  srctgt[[k]][2],
+                   alpha = runif(1,0.05,0.95),
+                   weight = runif(1,0.1,0.45))
+    }
+    # Compute new data set to use for testing
+    data = ccov_dag_(g)
+    
+    simjointg = results[[i]]$sim_joint_results$g1
+    simg1 = results[[i]]$sim_data1_results$g
+    simg2 = results[[i]]$sim_data2_results$g
+
+    para_simjointg = evaluate_proposal(simjointg, data)
+    para_simg1 = evaluate_proposal(simg1, data)
+    para_simg2 = evaluate_proposal(simg2, data)
+
+    res_joint_error[i] = ctree_loss_(para_simjointg, dataref = data)
+    res_single_error1[i] = ctree_loss_(para_simg1, dataref = data)
+    res_single_error2[i] = ctree_loss_(para_simg2, dataref = data)
+  }
+  
+  return(list(res_joint_error = res_joint_error, 
+              res_single_error1 = res_single_error1, res_single_error2 = res_single_error2))
+}
+
+
+generate_ooseplot <- function(oose_errors) {
+  
+  df <- data.frame(
+    Iteration = 1:length(oose_errors$res_joint_error),
+    Joint = oose_errors$res_joint_error,
+    Data1 = oose_errors$res_single_error1,
+    Data2 = oose_errors$res_single_error2
+  )
+  
+  df_long <- reshape2::melt(df, id.vars = "Iteration", variable.name = "Method", value.name = "Error")
+  
+  # Generate the plot
+  p <- ggplot(df_long, aes(x = Iteration, y = Error, color = Method, shape = Method)) +
+    geom_point(size = 2.5) +
+    geom_line(aes(group = Iteration), color = "gray", linetype = "dashed") +
+    scale_y_log10() +
+    labs(title = "Out-of-Sample Errors",
+         x = "Iteration",
+         y = "Error",
+         color = "Method") +
+    theme_minimal()
+  
+  return(p)
+}
+
+
+generate_plots <- function(errors, title=NULL) {
+  
+  n_trials = length(errors$res_joint_error1)
+  df1 <- data.frame(iterations = 1:n_trials,
+                    res_joint_error1 = errors$res_joint_error1,
+                    res_single_error1 = errors$res_single_error1)
+  df2 <- data.frame(iterations = 1:n_trials,
+                    res_joint_error2 = errors$res_joint_error2,
+                    res_single_error2 = errors$res_single_error2)
+  
+  df1_long <- reshape2::melt(df1, id.vars = "iterations", variable.name = "method", value.name = "error")
+  df2_long <- reshape2::melt(df2, id.vars = "iterations", variable.name = "method", value.name = "error")
+  
+  p1 <- ggplot(df1_long, aes(x = iterations, y = error, color = method, shape = method, group = iterations)) +
+    geom_point(size = 2.5) +
+    geom_line(aes(group = iterations), color = "gray", linetype = "dashed") +
+    scale_shape_manual(values = c(16, 17)) +
+    scale_y_log10() +
+    labs(title = paste0("Predictive Error Comparison", " - ", title), x = "Iterations", y = "Log(Error)") +
+    theme_minimal()
+  
+  p2 <- ggplot(df2_long, aes(x = iterations, y = error, color = method, shape = method, group = iterations)) +
+    geom_point(size = 2.5) +
+    geom_line(aes(group = iterations), color = "gray", linetype = "dashed") +
+    scale_shape_manual(values = c(16, 18)) +
+    scale_y_log10() +
+    labs(title = paste0("Predictive Error Comparison", " - ", title), x = "Iterations", y = "Log(Error)") +
+    theme_minimal()
+  
+  p3 <- ggplot(df1_long, aes(x = method, y = error, fill = method)) +
+    geom_boxplot() +
+    scale_y_log10() +
+    labs(title = paste0("Predictive Error Comparison for dataset 1", " - ", title), x = "Method", y = "Log(Error)") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  p4 <- ggplot(df2_long, aes(x = method, y = error, fill = method)) +
+    geom_boxplot() +
+    scale_y_log10() +
+    labs(title = paste0("Predictive Error Comparison for dataset 2", " - ", title), x = "Method", y = "Log(Error)") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  return(list(plot1 = p1, plot2 = p2, plot3 = p3, plot4 = p4,
+              res_joint_error1 = errors$res_joint_error1, res_joint_error2 = errors$res_joint_error2,
+              res_single_error1 = errors$res_single_error1, res_single_error2 = errors$res_single_error2))
+}
 
 
 
 
 
+generate_annealing_plots <- function(results, title=NULL) {
 
+  n_trials = length(results)
+  
+  no_annealing_loss <- numeric(n_trials)
+  annealing_loss <- numeric(n_trials)
+  
+  for (i in 1:n_trials) {
+    no_annealing_loss[i] = results[[i]]$sim_data1_results$loss
+    annealing_loss[i] = results[[i]]$sim_data2_results$loss
+  }
+  
+  df1 <- data.frame(iterations = 1:n_trials,
+                    no_annealing_loss = no_annealing_loss,
+                    annealing_loss = annealing_loss )
 
-
-
+  
+  df1_long <- reshape2::melt(df1, id.vars = "iterations", variable.name = "method", value.name = "error")
+  
+  p1 <- ggplot(df1_long, aes(x = iterations, y = error, color = method, shape = method, group = iterations)) +
+    geom_point(size = 2.5) +
+    geom_line(aes(group = iterations), color = "gray", linetype = "dashed") +
+    scale_shape_manual(values = c(16, 17)) +
+    scale_y_log10() +
+    labs(title = paste0("Predictive Error Comparison", " - ", title), x = "Iterations", y = "Log(Error)") +
+    theme_minimal()
+  
+  p2 <- ggplot(df1_long, aes(x = method, y = error, fill = method)) +
+    geom_boxplot() +
+    scale_y_log10() +
+    labs(title = paste0("Predictive Error Comparison", " - ", title), x = "Method", y = "Log(Error)") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  return(list(plot1 = p1, plot2 = p2))
+}
 
 
 
@@ -2889,5 +3100,7 @@ check_topology <- function(g, gtrue){
 #   print(c("Final loss:", loss))  
 #   return(list(g = g, loss = loss, loss_list = losses))
 # }
+
+
 
 
