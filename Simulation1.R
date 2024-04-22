@@ -13,173 +13,276 @@ library(ggplot2)
 
 ################################################################################
 
+#save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
 
-## Simulation study 1 ##
+
+## Simulation studies ##
+
+annealing = 0
+maxiter = 250
 
 
-runsim <- function(n_features1, n_features2, n_pop, n_edges, n_trials, maxiter=250){
+# Simulation 1
 
-  poplabels =c("A","B","C","D", "E","F","G","H","I","J","K","L","M","N")
-  #maxiter = 250
-  # Set number of populations
-  # n_pop = 5
-  labels = c(poplabels[1:n_pop-1],"O")
-  # Set number of mixture edges
-  # n_edges = 2
-  
-  # Set number of features 
-  # n_features1 = 50
-  # n_features2 = 50
-  
-  
-  # Parallelisation 
-  cores <- detectCores()
-  cl <- makeCluster(cores)
-  registerDoParallel(cl)
-  
-  # Number of trials
-  n_trials = 25
-  
-  annealing = 0
-  
-  pop5_mix2_feat50_50 = foreach(k = 1:n_trials) %dopar% {
-    library(mvnfast)
-    setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project")
-    source("extendedfunctions.R")
-    
-    # Simulate a population model where there is an outgroup
-    g0 <- simCoal_(n_pop, labels = labels, outgroup = "O")
-    
-    # Simulate a new graph with same topology but different parameters 
-    g1 <- reparameterise(g0)
-    
-    # Add both to list
-    trueglist0 <- list()
-    trueglist0$g1 <- g0
-    trueglist0$g2 <- g1
-    class(trueglist0) <- "cglist"
-    
-    # Add mixture edges to both graphs
-    trueglist <- add_mixedges(g = trueglist0, n_edges = n_edges)
-    
-    # Compute covariance matrices from both graphs
-    truedatalist <- lapply(trueglist, ccov_dag_)
-    
-    # Record true observations
-    true_record <- list(
-      g1 = trueglist$g1,
-      g2 = trueglist$g2,
-      truedata1 = truedatalist$g1,
-      truedata2 = truedatalist$g2
-    )
-    
-    # Generate "noisy" synthetic data from the true data
-    simdata1 <- cov(rmvn(n = n_features1, mu = rep(0, n_pop), sigma = truedatalist$g1))
-    colnames(simdata1) <- labels
-    rownames(simdata1) <- labels
-    
-    simdata2 <- cov(rmvn(n = n_features2, mu = rep(0, n_pop), sigma = truedatalist$g2))
-    colnames(simdata2) <- labels
-    rownames(simdata2) <- labels
-    
-    # Add both simulated data sets to list
-    simdatalist <- list()
-    simdatalist$g1 <- simdata1
-    simdatalist$g2 <- simdata2
-    
-    # Simulate proposal graph for inference
-    proposal0 <- simCoal_(n_pop, labels = labels, outgroup = "O")
-    proposal <- add_mixedges(proposal0, n_edges = n_edges)
-    proplist <- list()
-    proplist$p1 <- proposal
-    proplist$p2 <- proposal
-    class(proplist) <- "cglist"
-    
-    # Make predictions with the simulated data
-    
-    # Joint inference with both data sets
-    joint_inf <- infer_graph(g = proplist, data =  simdatalist, maxiter = maxiter, movefreqs = c(1/4, 1/4, 1/4, 1/4),
-                             verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = annealing)
-    
-    # Inference with data set 1
-    data_inf1 <- infer_graph(g = proplist$p1, data =  simdatalist$g1, maxiter = maxiter, movefreqs = c(1/4, 1/4, 1/4, 1/4),
-                             verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = annealing)
-    
-    # Inference with data set 2
-    data_inf2 <- infer_graph(g = proplist$p1, data =  simdatalist$g2, maxiter = maxiter, movefreqs = c(1/4, 1/4, 1/4, 1/4),
-                             verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = annealing)
-    
-    # Record results
-    sim_joint_results <- list(
-      loss = joint_inf$loss,
-      loss_list = joint_inf$loss_list,
-      g1 = joint_inf$g[[1]],
-      g2 = joint_inf$g[[2]]
-    )
-    
-    sim_data1_results <- list(
-      loss = data_inf1$loss,
-      loss_list = data_inf1$loss_list,
-      g = data_inf1$g
-    )
-    
-    sim_data2_results <- list(
-      loss = data_inf2$loss,
-      loss_list = data_inf2$loss_list,
-      g = data_inf2$g
-    )
-    
-    return(list(true_record=true_record, sim_joint_results=sim_joint_results,
-                sim_data1_results=sim_data1_results,sim_data2_results=sim_data2_results))
-  }
-  stopCluster(cl)
-}
+pop5_mix0_feat10_10 = runsim(n_features1 = 10,n_features2 = 10,n_pop = 5,n_edges = 0,n_trials = 100)
 
-test = runsim(n_features1 = 1000,n_features2 = 1000,n_pop = 5,n_edges = 1,n_trials = 1,maxiter = 1)
+pop5_mix0_feat25_25 = runsim(n_features1 = 25,n_features2 = 25,n_pop = 5,n_edges = 0,n_trials = 100)
 
-## Record ##
+pop5_mix0_feat50_50 = runsim(n_features1 = 50,n_features2 = 50,n_pop = 5,n_edges = 0,n_trials = 100)
 
-# populations = 5, mix = 1, data1 features = 25, data2 features = 25
-# populations = 5, mix = 2, data1 features = 10, data2 features = 50
+pop5_mix0_feat100_100 = runsim(n_features1 = 100,n_features2 = 100,n_pop = 5,n_edges = 0,n_trials = 100)
 
-# populations = 5, mix = 2, data1 features = 10, data2 features = 10
-# populations = 5, mix = 2, data1 features = 25, data2 features = 25
+pop5_mix0_feat250_250 = runsim(n_features1 = 250,n_features2 = 250,n_pop = 5,n_edges = 0,n_trials = 100)
 
-# populations = 5, mix = 2, data1 features = 10, data2 features = 1000
-# populations = 5, mix = 2, data1 features = 100, data2 features = 100
-# populations = 5, mix = 2, data1 features = 250, data2 features = 250
+pop5_mix0_feat500_500 = runsim(n_features1 = 500,n_features2 = 500,n_pop = 5,n_edges = 0,n_trials = 100)
+
+pop5_mix0_feat1000_1000 = runsim(n_features1 = 1000,n_features2 = 1000,n_pop = 5,n_edges = 0,n_trials = 100)
+
+
+# Simulation 2
+
+# n_pop = 5
+# n_edges = 1
+
+pop5_mix1_feat10_10 = runsim(n_features1 = 10,n_features2 = 10,n_pop = 5,n_edges = 1,n_trials = 100)
+
+pop5_mix1_feat25_25 = runsim(n_features1 = 25,n_features2 = 25,n_pop = 5,n_edges = 1,n_trials = 100)
+save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
+pop5_mix1_feat50_50 = runsim(n_features1 = 50,n_features2 = 50,n_pop = 5,n_edges = 1,n_trials = 100)
+save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
+pop5_mix1_feat100_100 = runsim(n_features1 = 100,n_features2 = 100,n_pop = 5,n_edges = 1,n_trials = 100)
+save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
+pop5_mix1_feat250_250 = runsim(n_features1 = 250,n_features2 = 250,n_pop = 5,n_edges = 1,n_trials = 100)
+save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
+pop5_mix1_feat500_500 = runsim(n_features1 = 500,n_features2 = 500,n_pop = 5,n_edges = 1,n_trials = 100)
+save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
+pop5_mix1_feat1000_1000 = runsim(n_features1 = 1000,n_features2 = 1000,n_pop = 5,n_edges = 1,n_trials = 100)
+save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
 
 
 
-# 5 populations, 2 admixture, 10 features each
-errors_pop5_mix2_feat10_10 = prediction_errors(pop5_mix2_feat10_10)
-generate_plots(errors_pop5_mix2_feat10_10, title = "5 populations, 2 admixture, 10 features each")
 
-# 5 populations, 2 admixture, 25 features each
-errors_pop5_mix2_feat25_25 = prediction_errors(pop5_mix2_feat25_25)
-generate_plots(errors_pop5_mix2_feat25_25, title = "5 populations, 2 admixture, 25 features each")
+# Simulation 3
 
-# 5 populations, 2 admixture, 50 features each
-errors_pop5_mix2_feat50_50 = prediction_errors(pop5_mix2_feat50_50)
-generate_plots(errors_pop5_mix2_feat50_50, title = "5 populations, 2 admixture, 50 features each")
+# n_pop = 5
+# n_edges = 2
 
-# 5 populations, 2 admixture, 100 features each
-errors_pop5_mix2_feat100_100 = prediction_errors(pop5_mix2_feat100_100)
-generate_plots(errors_pop5_mix2_feat100_100, title = "5 populations, 2 admixture, 100 features each")
+pop5_mix2_feat10_10_add = runsim(n_features1 = 10,n_features2 = 10,n_pop = 5,n_edges = 2,n_trials = 75)
 
-# 5 populations, 2 admixture, 250 features each
-errors_pop5_mix2_feat250_250 = prediction_errors(pop5_mix2_feat250_250)
-generate_plots(errors_pop5_mix2_feat250_250, title = "5 populations, 2 admixture, 250 features each")
+pop5_mix2_feat25_25_add = runsim(n_features1 = 25,n_features2 = 25,n_pop = 5,n_edges = 2,n_trials = 75)
 
-# 5 populations, 2 admixture, 500 features each
-errors_pop5_mix2_feat500_500 = prediction_errors(pop5_mix2_feat500_500)
-generate_plots(errors_pop5_mix2_feat500_500, title = "5 populations, 2 admixture, 500 features each")
+pop5_mix2_feat50_50_add = runsim(n_features1 = 50,n_features2 = 50,n_pop = 5,n_edges = 2,n_trials = 75)
 
-# 5 populations, 2 admixture, 1000 features each
-errors_pop5_mix2_feat1000_1000 = prediction_errors(pop5_mix2_feat1000_1000)
-generate_plots(errors_pop5_mix2_feat1000_1000, title = "5 populations, 2 admixture, 1000 features each")
+pop5_mix2_feat100_100_add = runsim(n_features1 = 100,n_features2 = 100,n_pop = 5,n_edges = 2,n_trials = 75)
+
+pop5_mix2_feat250_250_add = runsim(n_features1 = 250,n_features2 = 250,n_pop = 5,n_edges = 2,n_trials = 75)
+
+pop5_mix2_feat500_500_add = runsim(n_features1 = 500,n_features2 = 500,n_pop = 5,n_edges = 2,n_trials = 75)
+
+
+
+
+temp10 = c(pop5_mix2_feat10_10, pop5_mix2_feat10_10_add)
+
+temp25 = c(pop5_mix2_feat25_25, pop5_mix2_feat25_25_add)
+
+temp50 = c(pop5_mix2_feat50_50, pop5_mix2_feat50_50_add)
+
+temp100 = c(pop5_mix2_feat100_100, pop5_mix2_feat100_100_add)
+
+temp250 = c(pop5_mix2_feat250_250, pop5_mix2_feat250_250_add)
+
+temp500 = c(pop5_mix2_feat500_500, pop5_mix2_feat500_500_add)
+
+temp1000 = c(pop5_mix2_feat1000_1000,pop5_mix2_feat1000_1000_add1,pop5_mix2_feat1000_1000_add2,pop5_mix2_feat1000_1000_add3)
+
+
+
+pop5_mix2_feat10_10 = temp10
+
+pop5_mix2_feat25_25 = temp25
+
+pop5_mix2_feat50_50 = temp50
+
+pop5_mix2_feat100_100 = temp100
+
+pop5_mix2_feat250_250 = temp250
+
+pop5_mix2_feat500_500 = temp500
+
+pop5_mix2_feat1000_1000 = temp1000
+
+
+# ####
+# pop5_mix2_feat1000_1000_add1 = runsim(n_features1 = 1000,n_features2 = 1000,n_pop = 5,n_edges = 2,n_trials = 25)
+# save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
+# 
+# pop5_mix2_feat1000_1000_add2 = runsim(n_features1 = 1000,n_features2 = 1000,n_pop = 5,n_edges = 2,n_trials = 25)
+# save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
+# 
+# pop5_mix2_feat1000_1000_add3 = runsim(n_features1 = 1000,n_features2 = 1000,n_pop = 5,n_edges = 2,n_trials = 25)
+# save.image("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project/Simulation 1 data.RData")
+
+
+
+#plot.cg_(pop5_mix2_feat500_500_add[[1]]$true_record$g1)
+
+
+
+
+
+# Experiment 4
+
+# n_pop = 6
+# n_edges = 1
 
 ####
+
+
+## Plots - Simulation 1 ##
+
+oose_pop5_mix0_feat10_10 = outofsample_errors(pop5_mix0_feat10_10)
+oose_pop5_mix0_feat25_25 = outofsample_errors(pop5_mix0_feat25_25)
+oose_pop5_mix0_feat50_50 = outofsample_errors(pop5_mix0_feat50_50)
+oose_pop5_mix0_feat100_100 = outofsample_errors(pop5_mix0_feat100_100)
+oose_pop5_mix0_feat250_250 = outofsample_errors(pop5_mix0_feat250_250)
+oose_pop5_mix0_feat500_500 = outofsample_errors(pop5_mix0_feat500_500)
+oose_pop5_mix0_feat1000_1000 = outofsample_errors(pop5_mix0_feat1000_1000)
+
+
+generate_ooseplot(oose_pop5_mix0_feat10_10, title = "5 populations, 0 admixtures, 10 features")
+generate_ooseplot(oose_pop5_mix0_feat25_25, title = "5 populations, 0 admixtures, 25 features")
+generate_ooseplot(oose_pop5_mix0_feat50_50, title = "5 populations, 0 admixtures, 50 features")
+generate_ooseplot(oose_pop5_mix0_feat100_100, title = "5 populations, 0 admixtures, 100 features")
+generate_ooseplot(oose_pop5_mix0_feat250_250, title = "5 populations, 0 admixtures, 250 features")
+generate_ooseplot(oose_pop5_mix0_feat500_500, title = "5 populations, 0 admixtures, 500 features")
+generate_ooseplot(oose_pop5_mix0_feat1000_1000, title = "5 populations, 0 admixtures, 1000 features")
+
+
+create_pairs_plot(oose_pop5_mix0_feat10_10, title = "5 populations, 0 admixtures, 10 features")
+create_pairs_plot(oose_pop5_mix0_feat25_25, title = "5 populations, 0 admixtures, 25 features")
+create_pairs_plot(oose_pop5_mix0_feat50_50, title = "5 populations, 0 admixtures, 50 features")
+create_pairs_plot(oose_pop5_mix0_feat100_100, title = "5 populations, 0 admixtures, 100 features")
+create_pairs_plot(oose_pop5_mix0_feat250_250, title = "5 populations, 0 admixtures, 250 features")
+create_pairs_plot(oose_pop5_mix0_feat500_500, title = "5 populations, 0 admixtures, 500 features")
+create_pairs_plot(oose_pop5_mix0_feat1000_1000, title = "5 populations, 0 admixtures, 1000 features")
+
+
+data_list_sim1 <- list(oose_pop5_mix0_feat10_10, oose_pop5_mix0_feat25_25,
+                       oose_pop5_mix0_feat50_50, oose_pop5_mix0_feat100_100,
+                       oose_pop5_mix0_feat250_250, oose_pop5_mix0_feat500_500,
+                       oose_pop5_mix0_feat1000_1000)
+
+n_features <- c(10, 25, 50, 100, 250, 500, 1000)
+
+plot_mean_oose_byfeat(n_features, data_list_sim1, title = "5 populations, 0 admixtures")
+
+
+###
+
+# Simulation 2 processing
+
+oose_pop5_mix1_feat10_10 = outofsample_errors(pop5_mix1_feat10_10)
+oose_pop5_mix1_feat25_25 = outofsample_errors(pop5_mix1_feat25_25)
+oose_pop5_mix1_feat50_50 = outofsample_errors(pop5_mix1_feat50_50)
+oose_pop5_mix1_feat100_100 = outofsample_errors(pop5_mix1_feat100_100)
+oose_pop5_mix1_feat250_250 = outofsample_errors(pop5_mix1_feat250_250)
+oose_pop5_mix1_feat500_500 = outofsample_errors(pop5_mix1_feat500_500)
+oose_pop5_mix1_feat1000_1000 = outofsample_errors(pop5_mix1_feat1000_1000)
+
+
+
+generate_ooseplot(oose_pop5_mix1_feat10_10, title = "5 populations, 1 admixture, 10 features")
+generate_ooseplot(oose_pop5_mix1_feat25_25, title = "5 populations, 1 admixture, 25 features")
+generate_ooseplot(oose_pop5_mix1_feat50_50, title = "5 populations, 1 admixture, 50 features")
+generate_ooseplot(oose_pop5_mix1_feat100_100, title = "5 populations, 1 admixture, 100 features")
+generate_ooseplot(oose_pop5_mix1_feat250_250, title = "5 populations, 1 admixture, 250 features")
+generate_ooseplot(oose_pop5_mix1_feat500_500, title = "5 populations, 1 admixture, 500 features")
+generate_ooseplot(oose_pop5_mix1_feat1000_1000, title = "5 populations, 1 admixture, 1000 features")
+
+
+
+create_pairs_plot(oose_pop5_mix1_feat10_10, title = "5 populations, 1 admixture, 10 features")
+create_pairs_plot(oose_pop5_mix1_feat25_25, title = "5 populations, 1 admixture, 25 features")
+create_pairs_plot(oose_pop5_mix1_feat50_50, title = "5 populations, 1 admixture, 50 features")
+create_pairs_plot(oose_pop5_mix1_feat100_100, title = "5 populations, 1 admixture, 100 features")
+create_pairs_plot(oose_pop5_mix1_feat250_250, title = "5 populations, 1 admixture, 250 features")
+create_pairs_plot(oose_pop5_mix1_feat500_500, title = "5 populations, 1 admixture, 500 features")
+create_pairs_plot(oose_pop5_mix1_feat1000_1000, title = "5 populations, 1 admixture, 1000 features")
+
+data_list_sim2 <- list(oose_pop5_mix1_feat10_10, oose_pop5_mix1_feat25_25,
+                       oose_pop5_mix1_feat50_50, oose_pop5_mix1_feat100_100,
+                       oose_pop5_mix1_feat250_250, oose_pop5_mix1_feat500_500,
+                       oose_pop5_mix1_feat1000_1000)
+
+n_features <- c(10, 25, 50, 100, 250, 500, 1000)
+
+plot_mean_oose_byfeat(n_features, data_list_sim2, title = "5 populations, 1 admixture")
+
+####
+
+# Simulation 3 processing
+
+oose_pop5_mix2_feat10_10 = outofsample_errors(pop5_mix2_feat10_10)
+oose_pop5_mix2_feat25_25 = outofsample_errors(pop5_mix2_feat25_25)
+oose_pop5_mix2_feat50_50 = outofsample_errors(pop5_mix2_feat50_50)
+oose_pop5_mix2_feat100_100 = outofsample_errors(pop5_mix2_feat100_100)
+oose_pop5_mix2_feat250_250 = outofsample_errors(pop5_mix2_feat250_250)
+oose_pop5_mix2_feat500_500 = outofsample_errors(pop5_mix2_feat500_500)
+oose_pop5_mix2_feat1000_1000 = outofsample_errors(pop5_mix2_feat1000_1000)
+
+
+generate_ooseplot(oose_pop5_mix2_feat10_10, title = "5 populations, 2 admixtures, 10 features")
+generate_ooseplot(oose_pop5_mix2_feat25_25, title = "5 populations, 2 admixtures, 25 features")
+generate_ooseplot(oose_pop5_mix2_feat50_50, title = "5 populations, 2 admixtures, 50 features")
+generate_ooseplot(oose_pop5_mix2_feat100_100, title = "5 populations, 2 admixtures, 100 features")
+generate_ooseplot(oose_pop5_mix2_feat250_250, title = "5 populations, 2 admixtures, 250 features")
+generate_ooseplot(oose_pop5_mix2_feat500_500, title = "5 populations, 2 admixtures, 500 features")
+generate_ooseplot(oose_pop5_mix2_feat1000_1000, title = "5 populations, 2 admixtures, 1000 features")
+
+
+create_pairs_plot(oose_pop5_mix2_feat10_10, title = "5 populations, 2 admixtures, 10 features")
+create_pairs_plot(oose_pop5_mix2_feat25_25, title = "5 populations, 2 admixtures, 25 features")
+create_pairs_plot(oose_pop5_mix2_feat50_50, title = "5 populations, 2 admixtures, 50 features")
+create_pairs_plot(oose_pop5_mix2_feat100_100, title = "5 populations, 2 admixtures, 100 features")
+create_pairs_plot(oose_pop5_mix2_feat250_250, title = "5 populations, 2 admixtures, 250 features")
+create_pairs_plot(oose_pop5_mix2_feat500_500, title = "5 populations, 2 admixtures, 500 features")
+create_pairs_plot(oose_pop5_mix2_feat1000_1000, title = "5 populations, 2 admixtures, 1000 features")
+
+
+data_list_sim3 <- list(oose_pop5_mix2_feat10_10, oose_pop5_mix2_feat25_25,
+                       oose_pop5_mix2_feat50_50, oose_pop5_mix2_feat100_100,
+                       oose_pop5_mix2_feat250_250, oose_pop5_mix2_feat500_500,
+                       oose_pop5_mix2_feat1000_1000)
+
+n_features <- c(10, 25, 50, 100, 250, 500, 1000)
+
+plot_mean_oose_byfeat(n_features, data_list_sim3, title = "5 populations, 2 admixtures")
+
+oose_pop5_mix2_feat10_10[[1:2]]
+
+
+################################################################################
+# 
+# data_list_sim2 <- list(oose_pop5_mix2_feat10_10, oose_pop5_mix2_feat25_25,
+#                        oose_pop5_mix2_feat50_50, oose_pop5_mix2_feat100_100,
+#                        oose_pop5_mix2_feat250_250, oose_pop5_mix2_feat500_500,
+#                        oose_pop5_mix2_feat1000_1000)
+# 
+# n_features <- c(10, 25, 50, 100, 250, 500, 1000)
+# 
+# plot_mean_oose_byfeat(n_features, data_list_sim2, title = "5 populations, 2 admixtures")
+# 
+
+
+
+p5m2_10_10 = pop5_mix0_feat10_10
+#oose_p5m2_50_50 = outofsample_errors(pop5_mix0_feat10_10)
+generate_ooseplot(oose_p5m2_10_10)
+create_pairs_plot(oose_p5m2_10_10)
+
+
+
 
 n_features = c(10,25,50,100,250,500,1000)
 
@@ -302,7 +405,33 @@ ggplot(df2_long, aes(x = n_features, y = value, color = variable)) +
   theme_minimal()
 
 
-
+# # 10 features each
+# errors_pop5_mix2_feat10_10 = prediction_errors(pop5_mix2_feat10_10)
+# generate_plots(errors_pop5_mix2_feat10_10, title = "5 populations, 2 admixture, 10 features each")
+# 
+# # 25 features each
+# errors_pop5_mix2_feat25_25 = prediction_errors(pop5_mix2_feat25_25)
+# generate_plots(errors_pop5_mix2_feat25_25, title = "5 populations, 2 admixture, 25 features each")
+# 
+# #  50 features each
+# errors_pop5_mix2_feat50_50 = prediction_errors(pop5_mix2_feat50_50)
+# generate_plots(errors_pop5_mix2_feat50_50, title = "5 populations, 2 admixture, 50 features each")
+# 
+# # 100 features each
+# errors_pop5_mix2_feat100_100 = prediction_errors(pop5_mix2_feat100_100)
+# generate_plots(errors_pop5_mix2_feat100_100, title = "5 populations, 2 admixture, 100 features each")
+# 
+# # 250 features each
+# errors_pop5_mix2_feat250_250 = prediction_errors(pop5_mix2_feat250_250)
+# generate_plots(errors_pop5_mix2_feat250_250, title = "5 populations, 2 admixture, 250 features each")
+# 
+# # 500 features each
+# errors_pop5_mix2_feat500_500 = prediction_errors(pop5_mix2_feat500_500)
+# generate_plots(errors_pop5_mix2_feat500_500, title = "5 populations, 2 admixture, 500 features each")
+# 
+# # 1000 features each
+# errors_pop5_mix2_feat1000_1000 = prediction_errors(pop5_mix2_feat1000_1000)
+# generate_plots(errors_pop5_mix2_feat1000_1000, title = "5 populations, 2 admixture, 1000 features each")
 
 #######
 # 5 populations, 2 admixture, dataset1 = 10 features, dataset2 = 50 features"
@@ -398,21 +527,6 @@ ggplot(oose_df_long, aes(x = n_features, y = value, color = variable)) +
 # Pairs log-log plots (Out of Sample)
 
 
-create_log_log_plot <- function(errors, title=NULL) {
-  df = data.frame(
-  joint= (errors$res_joint_error),
-  average_data1_data2 = ((errors$res_single_error1 + errors$res_single_error2)/2)
-  )
-  
-  ggplot(df, aes(x = joint, y = average_data1_data2)) +
-    geom_point() +
-    geom_smooth(method = "lm", se = FALSE, color = "red") +
-    theme_minimal() +
-    annotate("text", x = Inf, y = -Inf,
-             label = paste("Gradient: ", round(coef(lm(average_data1_data2 ~ joint, data = df))[2], 2)),
-             hjust = 1, vjust = 0) +
-    labs(x = "Average single log error", y = "Joint log Error", title = "Log-Log plot")
-}
 
 
 #########
@@ -420,7 +534,7 @@ create_log_log_plot <- function(errors, title=NULL) {
 
 
 # 10 features
-create_log_log_plot(oose_pop5_mix2_feat10_10)
+create_pairs_plot(oose_pop5_mix2_feat10_10)
 
 # 25 features
 create_log_log_plot(oose_pop5_mix2_feat25_25)
@@ -438,7 +552,7 @@ create_log_log_plot(oose_pop5_mix2_feat250_250)
 create_log_log_plot(oose_pop5_mix2_feat500_500)
 
 # 1000 features
-create_log_log_plot(oose_pop5_mix2_feat1000_1000)
+create_pairs_plot(oose_pop5_mix2_feat1000_1000)
 
 
 
