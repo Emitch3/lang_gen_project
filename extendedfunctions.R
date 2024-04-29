@@ -1,7 +1,8 @@
 setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project")
 source("mixfunctions.R")
-library("Clarity")
+#library("Clarity")
 
+# FUNCTIONS USED FOR INFERENCE #
 
 cnode_<-function(id,parents = NA,children = NA,d=NA,t=NA,p=NA,w=NA,type=NA,mixchild=NA){
   ## This is the generic function to create or update a node
@@ -1414,7 +1415,7 @@ mypruneregraftstep_<-function(g){
 }
 
 
-ctree_loss2_<-function(gref,dataref,stderr=NULL, lambda=0){
+ctree_loss2_<-function(gref,dataref,stderr=NULL, lambda=0.05){
   ## Evaluate the loss for a parameterised graph of class cg, NOT a cglist
   if(is.null(stderr)){
     len = nrow(dataref)
@@ -1424,9 +1425,9 @@ ctree_loss2_<-function(gref,dataref,stderr=NULL, lambda=0){
   dataref=dataref[gref$tip.label,gref$tip.label]
   loss<-sum(na.omit(as.numeric((pred-dataref)^2))/stderr)
   # penalisation term for the diagonals
-  #d = diag(pred)
-  # penalty <- lambda * sum((d-mean(d))^2)
-  # loss = loss + penalty
+  d = diag(pred)
+  penalty <- lambda * sum((d-mean(d))^2)
+  loss = loss + penalty
   return(loss)
 }
 
@@ -2360,6 +2361,8 @@ add_mixedges <- function(g, n_edges, swap= NULL, weights = NULL, randomlistweigh
   ## weights can be assigned or generated manually for graphs and cglists
   ## To assign weights manually to cglist, weights must be a list e.g. weights = list(c(0.1,0.2),c(0.3,0.4)) 
   #if(length(weights)>0 && length(weights)!= n_edges) stop("Error: Dimension of weights not equal to n_edges")
+  if(n_edges == 0) return(g)
+  
   randswap = FALSE
   if(length(swap)==0) randswap = TRUE
   
@@ -2445,6 +2448,112 @@ reparameterise<-function(g){
 ## Simulation functions ##
 
 
+# Simulation function
+runsim <- function(n_features1, n_features2, n_pop, n_edges, n_trials, maxiter=250){
+  
+  poplabels =c("A","B","C","D", "E","F","G","H","I","J","K","L","M","N")
+  labels = c(poplabels[1:n_pop-1],"O")
+  # Parallelisation 
+  cores <- detectCores()
+  cl <- makeCluster(cores)
+  registerDoParallel(cl)
+  annealing = 0
+  
+  res = foreach(k = 1:n_trials) %dopar% {
+    library(mvnfast)
+    setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project")
+    source("extendedfunctions.R")
+    
+    # Simulate a population model where there is an outgroup
+    g0 <- simCoal_(n_pop, labels = labels, outgroup = "O")
+    
+    # Simulate a new graph with same topology but different parameters 
+    g1 <- reparameterise(g0)
+    
+    # Add both to list
+    trueglist0 <- list()
+    trueglist0$g1 <- g0
+    trueglist0$g2 <- g1
+    class(trueglist0) <- "cglist"
+    
+    # Add mixture edges to both graphs
+    trueglist <- add_mixedges(g = trueglist0, n_edges = n_edges)
+    
+    # Compute covariance matrices from both graphs
+    truedatalist <- lapply(trueglist, ccov_dag_)
+    
+    # Record true observations
+    true_record <- list(
+      g1 = trueglist$g1,
+      g2 = trueglist$g2,
+      truedata1 = truedatalist$g1,
+      truedata2 = truedatalist$g2
+    )
+    
+    # Generate "noisy" synthetic data from the true data
+    simdata1 <- cov(rmvn(n = n_features1, mu = rep(0, n_pop), sigma = truedatalist$g1))
+    colnames(simdata1) <- labels
+    rownames(simdata1) <- labels
+    
+    simdata2 <- cov(rmvn(n = n_features2, mu = rep(0, n_pop), sigma = truedatalist$g2))
+    colnames(simdata2) <- labels
+    rownames(simdata2) <- labels
+    
+    # Add both simulated data sets to list
+    simdatalist <- list()
+    simdatalist$g1 <- simdata1
+    simdatalist$g2 <- simdata2
+    
+    # Simulate proposal graph for inference
+    proposal0 <- simCoal_(n_pop, labels = labels, outgroup = "O")
+    proposal <- add_mixedges(proposal0, n_edges = n_edges)
+    proplist <- list()
+    proplist$p1 <- proposal
+    proplist$p2 <- proposal
+    class(proplist) <- "cglist"
+    
+    # Make predictions with the simulated data
+    
+    # Joint inference with both data sets
+    joint_inf <- infer_graph(g = proplist, data =  simdatalist, maxiter = maxiter, movefreqs = c(1/4, 1/4, 1/4, 1/4),
+                             verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = annealing)
+    
+    # Inference with data set 1
+    data_inf1 <- infer_graph(g = proplist$p1, data =  simdatalist$g1, maxiter = maxiter, movefreqs = c(1/4, 1/4, 1/4, 1/4),
+                             verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = annealing)
+    
+    # Inference with data set 2
+    data_inf2 <- infer_graph(g = proplist$p1, data =  simdatalist$g2, maxiter = maxiter, movefreqs = c(1/4, 1/4, 1/4, 1/4),
+                             verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = annealing)
+    
+    # Record results
+    sim_joint_results <- list(
+      loss = joint_inf$loss,
+      loss_list = joint_inf$loss_list,
+      g1 = joint_inf$g[[1]],
+      g2 = joint_inf$g[[2]]
+    )
+    
+    sim_data1_results <- list(
+      loss = data_inf1$loss,
+      loss_list = data_inf1$loss_list,
+      g = data_inf1$g
+    )
+    
+    sim_data2_results <- list(
+      loss = data_inf2$loss,
+      loss_list = data_inf2$loss_list,
+      g = data_inf2$g
+    )
+    
+    return(list(true_record=true_record, sim_joint_results=sim_joint_results,
+                sim_data1_results=sim_data1_results,sim_data2_results=sim_data2_results))
+  }
+  stopCluster(cl)
+  return(res)
+}
+
+
 check_topology <- function(g, gtrue){
   if(is(g,"cglist")) {
     g = g[[1]]
@@ -2501,59 +2610,102 @@ prediction_errors <- function(results) {
               res_single_error1 = res_single_error1, res_single_error2 = res_single_error2))
 }
 
-
-
-outofsample_errors <- function(results) {
-  n_trials = length(results)
-  res_joint_error <- numeric(n_trials)
-  res_single_error1 <- numeric(n_trials)
-  res_single_error2 <- numeric(n_trials)
-  
-  for (i in 1:n_trials) {
-    # get true topology
-    g = results[[i]]$true_record$g1
-    # Reparameterise graph parameters of g
-    srctgt = list()
-    for(j in g$mix) {
-      if(g$nl[[j]]$children[1] %in% g$mix) {
-        srctgt[[length(srctgt)+1]] = c( get_nonmixchildren(g,g$nl[[j]]$children[1]), g$nl[[j]]$children[2])
-      }
-      else{
-        srctgt[[length(srctgt)+1]] = c( g$nl[[j]]$children[1], g$nl[[j]]$children[2])
-      }
-      g = removemixedge_(g=g,i=j)
-      g$spare = numeric(0)
-    }
-    g = reparameterise(g)
+mixedge_function <- function(g, srctgt) {
+  if(length(g$mix) > 0){
     for(k in 1:length(srctgt)){
       g = mixedge_(g = g, source = srctgt[[k]][1],
                    target =  srctgt[[k]][2],
                    alpha = runif(1,0.05,0.95),
                    weight = runif(1,0.1,0.45))
     }
+  }
+  return(g)
+}
+
+
+outofsample_errors <- function(results) {
+  n_trials = length(results)
+  # res_joint_error <- numeric(n_trials)
+  # res_single_error1 <- numeric(n_trials)
+  # res_single_error2 <- numeric(n_trials)
+  # Parallelisation 
+  cores <- detectCores()
+  cl <- makeCluster(cores)
+  registerDoParallel(cl)
+  
+  res = foreach(i = 1:n_trials, .combine = 'rbind', .multicombine = TRUE) %dopar% {
+    setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project/lang_gen_project")
+    source("extendedfunctions.R")
+  # for (i in 1:n_trials) {
+    # get true topology
+    g = results[[i]]$true_record$g1
+    # Reparameterise graph parameters of g
+    srctgt = list()
+    if(length(g$mix)>0){
+      for(j in g$mix) {
+        if(g$nl[[j]]$children[1] %in% g$mix) {
+          srctgt[[length(srctgt)+1]] = c( get_nonmixchildren(g,g$nl[[j]]$children[1]), g$nl[[j]]$children[2])
+        }
+        else{
+          srctgt[[length(srctgt)+1]] = c( g$nl[[j]]$children[1], g$nl[[j]]$children[2])
+        }
+        g = removemixedge_(g=g,i=j)
+        g$spare = numeric(0)
+      }
+    }
+    g1 = reparameterise(g)
+    g2 = reparameterise(g)
+    g3 = reparameterise(g)
+    g4 = reparameterise(g)
+    g5 = reparameterise(g)
+    
+    g1 = mixedge_function(g1)
+    g2 = mixedge_function(g2)
+    g3 = mixedge_function(g3)
+    g4 = mixedge_function(g4)
+    g5 = mixedge_function(g5)
+    
+    glist = list(g1,g2,g3,g4,g5)
+    class(glist) = "cglist"
     # Compute new data set to use for testing
-    data = ccov_dag_(g)
+    data = ccov_dag_(glist)
     
     simjointg = results[[i]]$sim_joint_results$g1
+    simjointg_list = list(simjointg,simjointg,simjointg,simjointg,simjointg)
+    class(simjointg_list) = "cglist"
     simg1 = results[[i]]$sim_data1_results$g
+    simg1_list = list(simg1,simg1,simg1,simg1,simg1)
+    class(simg1_list) = "cglist"
     simg2 = results[[i]]$sim_data2_results$g
+    simg2_list = list(simg2,simg2,simg2,simg2,simg2)
+    class(simg2_list) = "cglist"
 
-    para_simjointg = evaluate_proposal(simjointg, data)
-    para_simg1 = evaluate_proposal(simg1, data)
-    para_simg2 = evaluate_proposal(simg2, data)
+    para_simjointg = evaluate_proposal(simjointg_list, data)
+    para_simg1 = evaluate_proposal(simg1_list, data)
+    para_simg2 = evaluate_proposal(simg2_list, data)
+    
+    # res_joint_error[i] = ctree_loss_(para_simjointg, dataref = data)/5
+    # res_single_error1[i] = ctree_loss_(para_simg1, dataref = data)/5
+    # res_single_error2[i] = ctree_loss_(para_simg2, dataref = data)/5
+    
+    return(list(res_joint_error = ctree_loss_(para_simjointg, dataref = data)/5, 
+                res_single_error1 = ctree_loss_(para_simg1, dataref = data)/5, 
+                res_single_error2 = ctree_loss_(para_simg2, dataref = data)/5))
+    
 
-    res_joint_error[i] = ctree_loss_(para_simjointg, dataref = data)
-    res_single_error1[i] = ctree_loss_(para_simg1, dataref = data)
-    res_single_error2[i] = ctree_loss_(para_simg2, dataref = data)
   }
+  stopCluster(cl)
   
-  return(list(res_joint_error = res_joint_error, 
+  res_joint_error <- unlist(res[,1], use.names = FALSE)
+  res_single_error1 <- unlist(res[,2], use.names = FALSE)
+  res_single_error2 <- unlist(res[,3], use.names = FALSE)
+
+  return(list(res_joint_error = res_joint_error,
               res_single_error1 = res_single_error1, res_single_error2 = res_single_error2))
 }
 
 
-generate_ooseplot <- function(oose_errors) {
-  
+generate_ooseplot <- function(oose_errors, title = NULL) {
   df <- data.frame(
     Iteration = 1:length(oose_errors$res_joint_error),
     Joint = oose_errors$res_joint_error,
@@ -2561,25 +2713,230 @@ generate_ooseplot <- function(oose_errors) {
     Data2 = oose_errors$res_single_error2
   )
   
-  df_long <- reshape2::melt(df, id.vars = "Iteration", variable.name = "Method", value.name = "Error")
+  df_long <- reshape2::melt(df, id.vars = "Iteration", variable.name = "Inference", value.name = "Error")
   
   # Generate the plot
-  p <- ggplot(df_long, aes(x = Iteration, y = Error, color = Method, shape = Method)) +
-    geom_point(size = 2.5) +
+  p <- ggplot(df_long, aes(x = Iteration, y = Error, color = Inference, shape = Inference)) +
+    geom_point(size = 2.5,stroke=1, alpha=1) +
     geom_line(aes(group = Iteration), color = "gray", linetype = "dashed") +
+    scale_shape_manual(values=c(15, 3, 4)) +
+    #scale_color_manual(values=c("red", "blue", "darkgreen")) +
     scale_y_log10() +
-    labs(title = "Out-of-Sample Errors",
+    labs(title = paste0("Out-of-Sample Prediction Errors - ", title),
          x = "Iteration",
-         y = "Error",
-         color = "Method") +
+         y = "Log(error)",
+         color = "Inference") +
     theme_minimal()
   
   return(p)
 }
 
 
-generate_plots <- function(errors, title=NULL) {
+plot_mean_oose_bymix <- function(n_admix, data_list, title = NULL) {
+  calculate_means <- function(data_list, error_type) {
+    sapply(data_list, function(data) mean(data[[error_type]]))
+  }
   
+  calculate_se <- function(data_list, error_type) {
+    sapply(data_list, function(data) sd(data[[error_type]]) / sqrt(length(data[[error_type]])))
+  }
+  
+  Joint <- calculate_means(data_list, "res_joint_error")
+  Data1 <- calculate_means(data_list, "res_single_error1")
+  Data2 <- calculate_means(data_list, "res_single_error2")
+  
+  Joint_se <- calculate_se(data_list, "res_joint_error")
+  Data1_se <- calculate_se(data_list, "res_single_error1")
+  Data2_se <- calculate_se(data_list, "res_single_error2")
+  
+  oose_df <- data.frame(n_admix, Joint, Data1, Data2, Joint_se, Data1_se, Data2_se)
+  
+  oose_df_long <- reshape2::melt(oose_df, id.vars = "n_admix", variable.name = "Method", value.name = "Mean_Error")
+  se_df_long <- reshape2::melt(oose_df[, c("n_admix", "Joint_se", "Data1_se", "Data2_se")], id.vars = "n_admix", variable.name = "Method", value.name = "SE")
+  se_df_long$Method <- gsub("_se", "", se_df_long$Method)
+  
+  oose_df_long <- merge(oose_df_long, se_df_long, by = c("n_admix", "Method"))
+  
+  ggplot(oose_df_long, aes(x = n_admix, y = Mean_Error, color = Method)) +
+    geom_line(linewidth=0.6) +
+    #scale_y_log10() +
+    geom_errorbar(aes(ymin = Mean_Error - SE, ymax = Mean_Error + SE), alpha = 0.75) +
+    labs(title = paste0("Mean Out-of-Sample Prediction Errors by Admixture Edge Count", title), x = "Number of admixtures", 
+         y = "Mean Error",  color = "Method") +
+    theme_minimal()
+}
+
+
+plot_mean_oose_bymix <- function(n_admix, data_list, title = NULL) {
+  calculate_means <- function(data_list, error_type) {
+    sapply(data_list, function(data) mean(data[[error_type]]))
+  }
+  
+  calculate_se <- function(data_list, error_type) {
+    sapply(data_list, function(data) sd(data[[error_type]]) / sqrt(length(data[[error_type]])))
+  }
+  
+  Joint <- calculate_means(data_list, "res_joint_error")
+  Data1 <- calculate_means(data_list, "res_single_error1")
+  Data2 <- calculate_means(data_list, "res_single_error2")
+  
+  Joint_se <- calculate_se(data_list, "res_joint_error")
+  Data1_se <- calculate_se(data_list, "res_single_error1")
+  Data2_se <- calculate_se(data_list, "res_single_error2")
+  
+  oose_df <- data.frame(n_admix, Joint, Data1, Data2, Joint_se, Data1_se, Data2_se)
+  
+  oose_df_long <- reshape2::melt(oose_df, id.vars = "n_admix", variable.name = "Method", value.name = "Mean_Error")
+  se_df_long <- reshape2::melt(oose_df[, c("n_admix", "Joint_se", "Data1_se", "Data2_se")], id.vars = "n_admix", variable.name = "Method", value.name = "SE")
+  se_df_long$Method <- gsub("_se", "", se_df_long$Method)
+  
+  oose_df_long <- merge(oose_df_long, se_df_long, by = c("n_admix", "Method"))
+  
+  ggplot(oose_df_long, aes(x = n_admix, y = Mean_Error, color = Method)) +
+    geom_line(linewidth=0.6) +
+    #scale_y_log10() +
+    geom_errorbar(aes(ymin = Mean_Error - SE, ymax = Mean_Error + SE), alpha = 0.75) +
+    labs(title = paste0("Mean Out-of-Sample Prediction Errors by Admixture Edge Count", title), x = "Number of admixtures", 
+         y = "Mean Error",  color = "Method") +
+    theme_minimal()
+}
+
+
+generate_oosehist <- function(oose_errors, title = NULL) {
+  df <- data.frame(
+    Joint = ifelse(oose_errors$res_joint_error < 1e-10, 1, 0),
+    Data1 = ifelse(oose_errors$res_single_error1 < 1e-10, 1, 0),
+    Data2 = ifelse(oose_errors$res_single_error2 < 1e-10, 1, 0)
+  )
+  df_melt <- reshape2::melt(df)
+  ggplot(df_melt, aes(x=factor(value))) + 
+    geom_bar() + 
+    facet_wrap(~variable) + 
+    labs(x ="Inference Status (0 = Incorrect, 1 = Correct)", 
+         y = "Number of Instances", 
+         title = paste0("Inference Status Distribution - ", title)
+    )
+}
+
+
+
+###
+
+# create_pairs_plot <- function(errors, title=NULL) {
+#   df = data.frame(
+#     joint= log(errors$res_joint_error),
+#     average_data1_data2 = log((errors$res_single_error1 + errors$res_single_error2)/2)
+#   )
+# 
+#   ggplot(df, aes(x = joint, y = average_data1_data2)) +
+#     geom_point() +
+#     geom_smooth(method = "lm", se = FALSE, color = "red") +
+#     theme_minimal() +
+#     annotate("text", x = Inf, y = -Inf,
+#              label = paste("Gradient: ", round(coef(lm(average_data1_data2 ~ joint, data = df))[2], 2)),
+#              hjust = 1, vjust = 0) +
+#     labs(x = "Average single log error", y = "Joint log Error", title = "Log-Log plot")
+# }
+
+
+create_pairs_plot <- function(errors, title=NULL) {
+  
+  df = data.frame(
+    joint= errors$res_joint_error,
+    average_data1_data2 = (errors$res_single_error1 + errors$res_single_error2)/2
+  )
+  # Calculate the IQR for each column
+  Q1_joint <- quantile(df$joint, 0.25)
+  Q3_joint <- quantile(df$joint, 0.75)
+  IQR_joint <- Q3_joint - Q1_joint
+
+  Q1_average <- quantile(df$average_data1_data2, 0.25)
+  Q3_average <- quantile(df$average_data1_data2, 0.75)
+  IQR_average <- Q3_average - Q1_average
+
+  # Identify outliers
+  outliers_joint <- ((df$joint < (Q1_joint - 1.5 * IQR_joint)) | (df$joint > (Q3_joint + 1.5 * IQR_joint)))
+  outliers_average <- ((df$average_data1_data2 < (Q1_average - 1.5 * IQR_average)) | (df$average_data1_data2 > (Q3_average + 1.5 * IQR_average)))
+
+  # Remove outliers
+  df <- df[!outliers_joint & !outliers_average, ]
+
+  grad = round(coef(lm(average_data1_data2 ~ joint, data = df))[2], 2)
+
+  ggplot(df, aes(x = average_data1_data2, y = joint)) +
+    geom_point() +
+    # scale_y_log10() +
+    # scale_x_log10() +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    theme_minimal() +
+    annotate("text", x = Inf, y = 0,
+             label = paste("Gradient: ", grad),
+             hjust = 1, vjust = 0) +
+
+    labs(x = "Error - avg. of Data 1 & Data 2", y = "Error - Joint", title = paste0("Comparison of Joint Error and Average Individual Errors  - ", title))
+}
+
+
+plot_mean_oose_byfeat <- function(n_features, data_list, title = NULL) {
+  calculate_means <- function(data_list, error_type) {
+  sapply(data_list, function(data) mean(data[[error_type]]))
+  }
+
+  Joint <- calculate_means(data_list, "res_joint_error")
+  Data1 <- calculate_means(data_list, "res_single_error1")
+  Data2 <- calculate_means(data_list, "res_single_error2")
+  
+  oose_df <- data.frame(n_features, Joint, Data1, Data2)
+  
+  oose_df_long <- reshape2::melt(oose_df, id.vars = "n_features")
+  
+  ggplot(oose_df_long, aes(x = n_features, y = value, color = variable)) +
+    geom_line() +
+    # scale_y_log10() +
+    labs(title = paste0("Mean Out-of-Sample Prediction Errors by Feature Count - ", title), x = "Number of Features", 
+         y = "Mean Error",  color = "Method") +
+    theme_minimal()
+}
+
+
+plot_mean_oose_byfeat <- function(n_features, data_list, title = NULL) {
+  calculate_means <- function(data_list, error_type) {
+    sapply(data_list, function(data) mean(data[[error_type]]))
+  }
+  
+  calculate_se <- function(data_list, error_type) {
+    sapply(data_list, function(data) sd(data[[error_type]]) / sqrt(length(data[[error_type]])))
+  }
+  
+  Joint <- calculate_means(data_list, "res_joint_error")
+  Data1 <- calculate_means(data_list, "res_single_error1")
+  Data2 <- calculate_means(data_list, "res_single_error2")
+  
+  Joint_se <- calculate_se(data_list, "res_joint_error")
+  Data1_se <- calculate_se(data_list, "res_single_error1")
+  Data2_se <- calculate_se(data_list, "res_single_error2")
+  
+  oose_df <- data.frame(n_features, Joint, Data1, Data2, Joint_se, Data1_se, Data2_se)
+  
+  oose_df_long <- reshape2::melt(oose_df, id.vars = "n_features", variable.name = "Method", value.name = "Mean_Error")
+  se_df_long <- reshape2::melt(oose_df[, c("n_features", "Joint_se", "Data1_se", "Data2_se")], id.vars = "n_features", variable.name = "Method", value.name = "SE")
+  se_df_long$Method <- gsub("_se", "", se_df_long$Method)
+  
+  oose_df_long <- merge(oose_df_long, se_df_long, by = c("n_features", "Method"))
+  
+  ggplot(oose_df_long, aes(x = n_features, y = Mean_Error, color = Method)) +
+    geom_line(linewidth=0.6) +
+    #scale_y_log10() +
+    geom_errorbar(aes(ymin = Mean_Error - SE, ymax = Mean_Error + SE), alpha = 0.75) +
+    labs(title = paste0("Mean Out-of-Sample Prediction Errors by Feature Count - ", title), x = "Number of Features", 
+         y = "Mean Error",  color = "Method") +
+    theme_minimal()
+}
+
+
+
+generate_plots <- function(errors, title=NULL) {
+
   n_trials = length(errors$res_joint_error1)
   df1 <- data.frame(iterations = 1:n_trials,
                     res_joint_error1 = errors$res_joint_error1,
@@ -2587,10 +2944,10 @@ generate_plots <- function(errors, title=NULL) {
   df2 <- data.frame(iterations = 1:n_trials,
                     res_joint_error2 = errors$res_joint_error2,
                     res_single_error2 = errors$res_single_error2)
-  
+
   df1_long <- reshape2::melt(df1, id.vars = "iterations", variable.name = "method", value.name = "error")
   df2_long <- reshape2::melt(df2, id.vars = "iterations", variable.name = "method", value.name = "error")
-  
+
   p1 <- ggplot(df1_long, aes(x = iterations, y = error, color = method, shape = method, group = iterations)) +
     geom_point(size = 2.5) +
     geom_line(aes(group = iterations), color = "gray", linetype = "dashed") +
@@ -2598,7 +2955,7 @@ generate_plots <- function(errors, title=NULL) {
     scale_y_log10() +
     labs(title = paste0("Predictive Error Comparison", " - ", title), x = "Iterations", y = "Log(Error)") +
     theme_minimal()
-  
+
   p2 <- ggplot(df2_long, aes(x = iterations, y = error, color = method, shape = method, group = iterations)) +
     geom_point(size = 2.5) +
     geom_line(aes(group = iterations), color = "gray", linetype = "dashed") +
@@ -2606,21 +2963,21 @@ generate_plots <- function(errors, title=NULL) {
     scale_y_log10() +
     labs(title = paste0("Predictive Error Comparison", " - ", title), x = "Iterations", y = "Log(Error)") +
     theme_minimal()
-  
+
   p3 <- ggplot(df1_long, aes(x = method, y = error, fill = method)) +
     geom_boxplot() +
     scale_y_log10() +
     labs(title = paste0("Predictive Error Comparison for dataset 1", " - ", title), x = "Method", y = "Log(Error)") +
     theme_minimal() +
     theme(legend.position = "none")
-  
+
   p4 <- ggplot(df2_long, aes(x = method, y = error, fill = method)) +
     geom_boxplot() +
     scale_y_log10() +
     labs(title = paste0("Predictive Error Comparison for dataset 2", " - ", title), x = "Method", y = "Log(Error)") +
     theme_minimal() +
     theme(legend.position = "none")
-  
+
   return(list(plot1 = p1, plot2 = p2, plot3 = p3, plot4 = p4,
               res_joint_error1 = errors$res_joint_error1, res_joint_error2 = errors$res_joint_error2,
               res_single_error1 = errors$res_single_error1, res_single_error2 = errors$res_single_error2))
@@ -2676,8 +3033,8 @@ generate_annealing_plots <- function(results, title=NULL) {
 
 #######################
 
-## Unused code ##
-# 
+##### Unused code #####
+
 # nn_interchange <- function(g, source, target){
 #   # swaps sub-trees "rooted" at source and target nodes 
 #   
@@ -3100,6 +3457,142 @@ generate_annealing_plots <- function(results, title=NULL) {
 #   print(c("Final loss:", loss))  
 #   return(list(g = g, loss = loss, loss_list = losses))
 # }
+
+
+# infer_graph2 <- function(g, data, n_edges, maxiter=100, movefreqs=c(1/4,1/4,1/4,1/4), 
+#                          verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = 0){
+#   # Input Tree proposal (without mixture edges) and number of mixture edges to be inferred
+#   # Mixture edges are added sequentially to help inference
+#   
+#   maxiter_i = ceiling(maxiter/(n_edges+1))
+#   loss_list = NULL
+#   if(verbose) print("INITIAL RUN: Iteration 1 - Performing inference without mixture edges")
+#   
+#   for(i in 0:n_edges){
+#     max = maxiter_i*(i+1)
+#     
+#     if(i>0) {
+#       if(verbose)  print(paste("NEW RUN: Iteration", i+1, "- Adding one additional mixture edge to the graph"))
+#       
+#       ## Use residuals to suggest mixture parent and child nodes
+#       res = residual(g=g,data=dataref)
+#       if(is(res,"list")) {
+#         i = which.max(sapply(res, max))
+#         res = res[[i]]
+#       }
+#       pair = as.vector(which(res == max(res), arr.ind = TRUE)[1,])
+#       swap = list(rem=NA,source=pair[1],target=pair[2])
+#       
+#       if(is(g,"cglist") && isvalidregraftmixture_(g[[1]],rem = NA,ret = pair)) {
+#         g = add_mixedges(g, n_edges = 1,swap = swap)
+#         
+#       }else if(isvalidregraftmixture_(g,rem = NA,ret = pair)){
+#         g = add_mixedges(g, n_edges = 1,swap = swap)
+#         
+#       }else g = add_mixedges(g, n_edges = 1)
+#     }
+#     
+#     tinf = infer_graph(g, data, maxiter=max, movefreqs=movefreqs , verbose = verbose
+#                        , plotprogress = plotprogress, losstol = losstol, MHtol = MHtol) 
+#     g = tinf$g
+#     res = g
+#     loss = tinf$loss
+#     loss_list = c(loss_list, tinf$loss_list)
+#   }
+#   return(list(g = g, loss = loss, loss_list = loss_list))
+# }  
+# 
+# 
+# residual <- function(g, data){
+#   if(is(g,"cglist")){ 
+#     ret = list()
+#     for(i in 1:length(g))
+#       ret[[i]] = residual(g[[i]],data[[i]])
+#     return(ret)
+#   }else {
+#     res = data - ccov_dag_(g)
+#   }
+#   return(res)
+# }
+# 
+# 
+# 
+# infer_graph3 <- function(g, data, n_edges, maxiter=100, movefreqs=c(1/4,1/4,1/4,1/4), 
+#                          verbose = FALSE, plotprogress = FALSE, losstol = 1e-30, MHtol = 0){
+#   # Input Tree proposal (without mixture edges) and number of mixture edges to be inferred
+#   # Mixture edges are added sequentially to help inference
+#   
+#   #maxiter_i = ceiling(maxiter/(n_edges+1))
+#   loss_list = NULL
+#   if(verbose) print("INITIAL RUN: Iteration 1 - Performing inference without mixture edges")
+#   
+#   for(i in 0:1){
+#     #max = maxiter_i*(i+1)
+#     
+#     if(i==1) {
+#       if(verbose)  print("NEW RUN: Adding mixture edges")#print(paste("NEW RUN: Iteration", i+1, "- Adding one additional mixture edge to the graph"))
+#       
+#       for(j in 1:n_edges) {
+#         ## Use residuals to suggest mixture parent and child nodes
+#         res = residual(g=g,data=dataref)
+#         if(is(res,"list")) {
+#           k = which.max(sapply(res, max))
+#           res = res[[k]]
+#         }
+#         pair = as.vector(which(res == max(res), arr.ind = TRUE)[1,])
+#         swap = list(rem=NA,source=pair[1],target=pair[2])
+#         
+#         if(is(g,"cglist") && isvalidregraftmixture_(g[[1]],rem = NA,ret = pair)) {
+#           g = add_mixedges(g, n_edges = 1,swap = swap)
+#           
+#         }else if(isvalidregraftmixture_(g,rem = NA,ret = pair)) {
+#           g = add_mixedges(g, n_edges = 1,swap = swap)
+#           
+#         }else g = add_mixedges(g, n_edges = 1)
+#         
+#       }
+#     }
+#     
+#     tinf = infer_graph(g, data, maxiter=maxiter, movefreqs=movefreqs , verbose = verbose
+#                        , plotprogress = plotprogress, losstol = losstol, MHtol = MHtol) 
+#     g = tinf$g
+#     res = g
+#     loss = tinf$loss
+#     loss_list = c(loss_list, tinf$loss_list)
+#   }
+#   return(list(g = g, loss = loss, loss_list = loss_list))
+# }  
+
+# 
+# nearestTip <- function(g, i){
+#   tips = tipsunder_(g, i)
+#   distancelist = list()
+#   for (t in tips) {
+#     distance = 0
+#     nodepath = nodesabove(g,t)
+#     for (j in nodepath) {
+#       distance = distance + g$nl[[j]]$d #*g$nl[[j]]$w
+#     }
+#     distancelist[[as.character(t)]] = distance
+#   }
+#   return(distancelist)
+# }
+# 
+# plotres <- function(gref,dataref,center=FALSE){
+#   pred <- ccov_dag_(gref)
+#   loss <- dataref - pred
+#   pt=plot.cg_(gref,show=FALSE)
+#   Clarity_Chart(ordermatrix(loss,pt$order),scalefun=myscalefun2,text=T )
+# }
+# 
+# plotcov <- function(gref,center=FALSE){
+#   pred <- ccov_dag_(gref)
+#   
+#   #loss <- (pred-dataref)^2
+#   pt=plot.cg_(gref,show=FALSE)
+#   Clarity_Chart(ordermatrix(pred,pt$order),scalefun=myscalefun2,text=T )
+# }
+
 
 
 
