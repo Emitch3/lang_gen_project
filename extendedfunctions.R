@@ -1,5 +1,5 @@
-setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project")
-source("mixfunctions.R")
+#setwd("C:/Users/USER/OneDrive/Bristol Year 4/Project")
+#source("mixfunctions.R")
 #library("Clarity")
 
 # FUNCTIONS USED FOR INFERENCE #
@@ -131,23 +131,23 @@ mixedge_<-function(g,source,target,alpha,weight){
   ## Update the target
   l <- length(g$nl[[target]]$parents)
   
-  g$nl[[target]]=cnode(g$nl[[target]])
+  g$nl[[target]]=cnode_(g$nl[[target]])
   g$nl[[target]]$w[1] = g$nl[[target]]$w[1] - weight
   g$nl[[target]]$w[length(g$nl[[target]]$w) + 1] = weight
   # if(g$nl[[target]]$w[1] < 0 ) warning("Warning: Admix mix edges must not total greater than 1")
   
   g$nl[[target]]$parents[l+1] = ti
   ## Update the source node (called source)
-  g$nl[[source]]=cnode(g$nl[[source]],d=g$nl[[source]]$d*alpha)
+  g$nl[[source]]=cnode_(g$nl[[source]],d=g$nl[[source]]$d*alpha)
   g$nl[[source]]$parents[1] = ti
   ## Update the original source's parent node (called parsource)
   if(!is.na(parsource)) { ## It was not the root.
     idx <- which(g$nl[[parsource]]$children == source)
-    g$nl[[parsource]] = cnode(g$nl[[parsource]])
+    g$nl[[parsource]] = cnode_(g$nl[[parsource]])
     g$nl[[parsource]]$children[idx]=ti
   }else{ ## It was not the root
     g$root=ti
-    g$nl[[source]]=cnode(g$nl[[source]],d=0.5,w=1)
+    g$nl[[source]]=cnode_(g$nl[[source]],d=0.5,w=1)
   }
   ## Update the list of nodes
   g$internal=c(g$internal,ti)
@@ -2820,7 +2820,7 @@ generate_oosehist <- function(oose_errors, title = NULL) {
 
 
 
-###
+#####
 
 # create_pairs_plot <- function(errors, title=NULL) {
 #   df = data.frame(
